@@ -1,0 +1,133 @@
+name: Deploy Dev
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: wumbo-ui-dev
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: dev
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+      PARAMETER_PREFIX: /wumbo/dev
+      DESIRED_COUNT: "2"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+
+      - name: Load deploy metadata from SSM
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          get_param() {
+            aws ssm get-parameter \
+              --name "$1" \
+              --query 'Parameter.Value' \
+              --output text
+          }
+
+          echo "ecr_repository_url=$(get_param "$PARAMETER_PREFIX/ui/app/ecr-repository-url")" >> "$GITHUB_OUTPUT"
+          echo "ecs_cluster_name=$(get_param "$PARAMETER_PREFIX/ui/app/ecs-cluster-name")" >> "$GITHUB_OUTPUT"
+          echo "ecs_service_name=$(get_param "$PARAMETER_PREFIX/ui/app/ecs-service-name")" >> "$GITHUB_OUTPUT"
+          echo "ecs_task_family=$(get_param "$PARAMETER_PREFIX/ui/app/ecs-task-family")" >> "$GITHUB_OUTPUT"
+          echo "next_public_cognito_domain=$(get_param "$PARAMETER_PREFIX/auth/cognito/ui-domain-url")" >> "$GITHUB_OUTPUT"
+          echo "next_public_cognito_client_id=$(get_param "$PARAMETER_PREFIX/auth/cognito/ui-client-id")" >> "$GITHUB_OUTPUT"
+          echo "next_public_cognito_redirect_uri=$(get_param "$PARAMETER_PREFIX/auth/cognito/ui-callback-urls" | cut -d',' -f1)" >> "$GITHUB_OUTPUT"
+          echo "next_public_cognito_logout_uri=$(get_param "$PARAMETER_PREFIX/auth/cognito/ui-logout-urls" | cut -d',' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE_TAG="sha-${GITHUB_SHA}"
+          IMAGE_URI="${{ steps.config.outputs.ecr_repository_url }}:${IMAGE_TAG}"
+
+          docker build \
+            --platform linux/amd64 \
+            --build-arg NEXT_PUBLIC_COGNITO_DOMAIN="${{ steps.config.outputs.next_public_cognito_domain }}" \
+            --build-arg NEXT_PUBLIC_COGNITO_CLIENT_ID="${{ steps.config.outputs.next_public_cognito_client_id }}" \
+            --build-arg NEXT_PUBLIC_COGNITO_REDIRECT_URI="${{ steps.config.outputs.next_public_cognito_redirect_uri }}" \
+            --build-arg NEXT_PUBLIC_COGNITO_LOGOUT_URI="${{ steps.config.outputs.next_public_cognito_logout_uri }}" \
+            --build-arg NEXT_PUBLIC_COGNITO_SCOPES="openid email profile" \
+            --tag "$IMAGE_URI" \
+            --tag "${{ steps.config.outputs.ecr_repository_url }}:latest" \
+            .
+
+          docker push "$IMAGE_URI"
+          docker push "${{ steps.config.outputs.ecr_repository_url }}:latest"
+
+          echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+
+      - name: Register task definition revision
+        id: taskdef
+        shell: bash
+        env:
+          IMAGE_URI: ${{ steps.image.outputs.image_uri }}
+        run: |
+          set -euo pipefail
+
+          aws ecs describe-task-definition \
+            --task-definition "${{ steps.config.outputs.ecs_task_family }}" \
+            --query 'taskDefinition' \
+            > task-definition.json
+
+          jq --arg image_uri "$IMAGE_URI" '
+            del(
+              .taskDefinitionArn,
+              .revision,
+              .status,
+              .requiresAttributes,
+              .compatibilities,
+              .registeredAt,
+              .registeredBy
+            )
+            | .containerDefinitions |= map(
+              if .name == "app" then .image = $image_uri else . end
+            )
+          ' task-definition.json > task-definition.rendered.json
+
+          TASK_DEFINITION_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://task-definition.rendered.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "task_definition_arn=$TASK_DEFINITION_ARN" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy task definition
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          aws ecs update-service \
+            --cluster "${{ steps.config.outputs.ecs_cluster_name }}" \
+            --service "${{ steps.config.outputs.ecs_service_name }}" \
+            --task-definition "${{ steps.taskdef.outputs.task_definition_arn }}" \
+            --desired-count "$DESIRED_COUNT" \
+            --force-new-deployment
+
+          aws ecs wait services-stable \
+            --cluster "${{ steps.config.outputs.ecs_cluster_name }}" \
+            --services "${{ steps.config.outputs.ecs_service_name }}"

@@ -1,0 +1,36 @@
+{
+  "name": "wumbo-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Core API service for wumbo.",
+  "scripts": {
+    "build": "sam build",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/**/*.test.ts",
+    "test:domain": "tsx --test src/domain/tests/**/*.test.ts",
+    "test:api": "tsx --test src/entrypoints/api/tests/**/*.test.ts",
+    "test:db": "tsx --test src/adapters/db/tests/**/*.test.ts",
+    "db:generate": "drizzle-kit generate --config=drizzle.config.mjs",
+    "db:migrate": "tsx src/adapters/db/migrate.ts",
+    "db:check": "drizzle-kit check --config=drizzle.config.mjs",
+    "db:studio": "drizzle-kit studio --config=drizzle.config.mjs",
+    "local:api": "sam local start-api --warm-containers EAGER",
+    "local:publisher": "sam local invoke PublishOutboxFunction"
+  },
+  "dependencies": {
+    "@aws-sdk/client-eventbridge": "^3.0.0",
+    "@aws-sdk/client-secrets-manager": "^3.0.0",
+    "drizzle-orm": "^0.44.5",
+    "pg": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.0",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
+    "dotenv": "^16.0.0",
+    "drizzle-kit": "^0.31.4",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}

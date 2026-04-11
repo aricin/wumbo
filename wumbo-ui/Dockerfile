@@ -1,0 +1,37 @@
+FROM node:22-bookworm-slim AS base
+WORKDIR /app
+
+FROM base AS deps
+COPY package.json package-lock.json ./
+RUN npm ci
+
+FROM base AS builder
+ARG NEXT_PUBLIC_COGNITO_DOMAIN
+ARG NEXT_PUBLIC_COGNITO_CLIENT_ID
+ARG NEXT_PUBLIC_COGNITO_REDIRECT_URI
+ARG NEXT_PUBLIC_COGNITO_LOGOUT_URI
+ARG NEXT_PUBLIC_COGNITO_SCOPES
+ENV NEXT_PUBLIC_COGNITO_DOMAIN=$NEXT_PUBLIC_COGNITO_DOMAIN
+ENV NEXT_PUBLIC_COGNITO_CLIENT_ID=$NEXT_PUBLIC_COGNITO_CLIENT_ID
+ENV NEXT_PUBLIC_COGNITO_REDIRECT_URI=$NEXT_PUBLIC_COGNITO_REDIRECT_URI
+ENV NEXT_PUBLIC_COGNITO_LOGOUT_URI=$NEXT_PUBLIC_COGNITO_LOGOUT_URI
+ENV NEXT_PUBLIC_COGNITO_SCOPES=$NEXT_PUBLIC_COGNITO_SCOPES
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+FROM node:22-bookworm-slim AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+RUN groupadd --system --gid 1001 nodejs
+RUN useradd --system --uid 1001 --gid nodejs nextjs
+
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+
+USER nextjs
+EXPOSE 3000
+CMD ["node", "server.js"]

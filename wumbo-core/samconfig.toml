@@ -1,0 +1,32 @@
+version = 0.1
+
+[dev.deploy.parameters]
+stack_name = "wumbo-core-dev"
+resolve_s3 = true
+s3_prefix = "wumbo-core-dev"
+region = "us-west-2"
+confirm_changeset = true
+capabilities = "CAPABILITY_NAMED_IAM"
+parameter_overrides = """\
+ServiceName="wumbo-core" \
+EnvironmentName="dev" \
+VpcId="vpc-012ebd9cab69ba00b" \
+VpcCidr="10.20.0.0/16" \
+PrivateSubnetIds="subnet-02997c13b8f99ce90,subnet-09876d6855dae133b" \
+DatabaseHost="wumbo-dev-postgres.c5844q4ui74l.us-west-2.rds.amazonaws.com" \
+DatabasePort="5432" \
+DatabaseName="wumbo" \
+DatabaseUsername="wumbo" \
+DatabaseSecretArn="arn:aws:secretsmanager:us-west-2:498309140969:secret:wumbo-dev-postgres/master-password-aWtP9X" \
+DatabaseSecretKmsKeyArn="arn:aws:kms:us-west-2:498309140969:key/a88439f7-25cf-489d-9edf-3cf75f3b492f" \
+EventBusName="wumbo-dev-domain-events" \
+CognitoIssuer="https://cognito-idp.us-west-2.amazonaws.com/us-west-2_m0C3yg1PT" \
+CognitoAudiences="601cnt9dh7lcfpo3so73nuqven,55dbje93godn400e8aktc6edjk" \
+PublisherScheduleExpression="rate(1 minute)" \
+PublisherScheduleState="ENABLED" \
+PublisherBatchSize="10"\
+"""
+image_repositories = []
+
+[dev.global.parameters]
+region = "us-west-2"

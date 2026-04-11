@@ -1,0 +1,545 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Core API service for wumbo.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: wumbo
+  ServiceName:
+    Type: String
+    Default: wumbo-core
+  EnvironmentName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  VpcCidr:
+    Type: String
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  DatabaseHost:
+    Type: String
+  DatabasePort:
+    Type: Number
+    Default: 5432
+  DatabaseName:
+    Type: String
+  DatabaseUsername:
+    Type: String
+  DatabaseSecretArn:
+    Type: String
+  DatabaseSecretKmsKeyArn:
+    Type: String
+    Default: ""
+  EventBusName:
+    Type: String
+    Default: ""
+  CognitoIssuer:
+    Type: String
+    Default: ""
+  CognitoAudiences:
+    Type: CommaDelimitedList
+    Default: ""
+  PublisherScheduleExpression:
+    Type: String
+    Default: rate(1 minute)
+  PublisherScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues:
+      - DISABLED
+      - ENABLED
+  PublisherBatchSize:
+    Type: Number
+    Default: 10
+  PublisherClaimTimeoutSeconds:
+    Type: Number
+    Default: 120
+  LogRetentionInDays:
+    Type: Number
+    Default: 30
+
+Conditions:
+  UseJwtAuth: !And
+    - !Not [!Equals [!Ref CognitoIssuer, ""]]
+    - !Not [!Equals [!Join ["", !Ref CognitoAudiences], ""]]
+  UseDatabaseSecretKmsKey: !Not [!Equals [!Ref DatabaseSecretKmsKeyArn, ""]]
+  UseEventBus: !Not [!Equals [!Ref EventBusName, ""]]
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures:
+      - arm64
+    CodeUri: .
+    MemorySize: 512
+    Timeout: 15
+    LoggingConfig:
+      LogFormat: JSON
+      ApplicationLogLevel: INFO
+      SystemLogLevel: INFO
+      LogGroup: !Sub "/${ProjectName}/${EnvironmentName}/${ServiceName}"
+    Environment:
+      Variables:
+        SERVICE_NAME: !Ref ServiceName
+        APP_ENV: !Ref EnvironmentName
+        DB_HOST: !Ref DatabaseHost
+        DB_PORT: !Ref DatabasePort
+        DB_NAME: !Ref DatabaseName
+        DB_USER: !Ref DatabaseUsername
+        DB_SECRET_ARN: !Ref DatabaseSecretArn
+        DB_SSL_ENABLED: "true"
+        EVENT_BUS_NAME: !Ref EventBusName
+        PUBLISHER_BATCH_SIZE: !Ref PublisherBatchSize
+        PUBLISHER_CLAIM_TIMEOUT_SECONDS: !Ref PublisherClaimTimeoutSeconds
+        ALLOW_DEV_IDENTITY_HEADER: !If [UseJwtAuth, "false", "true"]
+    VpcConfig:
+      SecurityGroupIds:
+        - !Ref CoreSecurityGroup
+      SubnetIds: !Ref PrivateSubnetIds
+
+Resources:
+  CoreSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Core service Lambda security group.
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - Description: PostgreSQL inside the workload VPC
+          IpProtocol: tcp
+          FromPort: !Ref DatabasePort
+          ToPort: !Ref DatabasePort
+          CidrIp: !Ref VpcCidr
+        - Description: NAT-backed outbound HTTPS for AWS public APIs and third-party services
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${ServiceName}-${EnvironmentName}-sg"
+        - Key: Project
+          Value: wumbo
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: SAM
+
+  CoreFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ServiceName}-${EnvironmentName}-lambda-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: !Sub "${ServiceName}-${EnvironmentName}-runtime"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadDatabaseSecret
+                Effect: Allow
+                Action:
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref DatabaseSecretArn
+              - !If
+                - UseDatabaseSecretKmsKey
+                - Sid: DecryptDatabaseSecret
+                  Effect: Allow
+                  Action:
+                    - kms:Decrypt
+                  Resource: !Ref DatabaseSecretKmsKeyArn
+                - !Ref AWS::NoValue
+              - !If
+                - UseEventBus
+                - Sid: PublishEvents
+                  Effect: Allow
+                  Action:
+                    - events:PutEvents
+                  Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/${EventBusName}"
+                - !Ref AWS::NoValue
+
+  CoreHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Name: !Sub "${ServiceName}-${EnvironmentName}"
+      StageName: !Ref EnvironmentName
+      Auth:
+        Authorizers:
+          CognitoJwtAuthorizer:
+            IdentitySource: "$request.header.Authorization"
+            JwtConfiguration:
+              issuer: !Ref CognitoIssuer
+              audience: !Ref CognitoAudiences
+        DefaultAuthorizer: CognitoJwtAuthorizer
+
+  HealthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-health"
+      Handler: src/entrypoints/api/handlers/health.handler
+      Role: !GetAtt CoreFunctionRole.Arn
+      Events:
+        HealthRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CoreHttpApi
+            Path: /health
+            Method: GET
+            Auth:
+              Authorizer: NONE
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/entrypoints/api/handlers/health.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2022
+
+  GetRequesterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-get-requester"
+      Handler: src/entrypoints/api/handlers/get-requester.handler
+      Role: !GetAtt CoreFunctionRole.Arn
+      Events:
+        GetRequesterRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CoreHttpApi
+            Path: /v1/me
+            Method: GET
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/entrypoints/api/handlers/get-requester.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2022
+
+  GetPublicProfileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-get-public-profile"
+      Handler: src/entrypoints/api/handlers/get-public-profile.handler
+      Role: !GetAtt CoreFunctionRole.Arn
+      Events:
+        GetPublicProfileRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CoreHttpApi
+            Path: /profiles/{handle}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/entrypoints/api/handlers/get-public-profile.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2022
+
+  GetMyProfileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-get-my-profile"
+      Handler: src/entrypoints/api/handlers/get-my-profile.handler
+      Role: !GetAtt CoreFunctionRole.Arn
+      Events:
+        GetMyProfileRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CoreHttpApi
+            Path: /v1/me/profile
+            Method: GET
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/entrypoints/api/handlers/get-my-profile.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2022
+
+  PatchMyPublicProfileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-patch-my-public-profile"
+      Handler: src/entrypoints/api/handlers/patch-my-public-profile.handler
+      Role: !GetAtt CoreFunctionRole.Arn
+      Events:
+        PatchMyPublicProfileRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CoreHttpApi
+            Path: /v1/me/public-profile
+            Method: PATCH
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/entrypoints/api/handlers/patch-my-public-profile.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2022
+
+  PatchMyPrivateProfileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-patch-my-private-profile"
+      Handler: src/entrypoints/api/handlers/patch-my-private-profile.handler
+      Role: !GetAtt CoreFunctionRole.Arn
+      Events:
+        PatchMyPrivateProfileRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CoreHttpApi
+            Path: /v1/me/private-profile
+            Method: PATCH
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/entrypoints/api/handlers/patch-my-private-profile.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2022
+
+  GetPropertyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-get-property"
+      Handler: src/entrypoints/api/handlers/get-property.handler
+      Role: !GetAtt CoreFunctionRole.Arn
+      Events:
+        GetPropertyRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CoreHttpApi
+            Path: /properties/{slug}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/entrypoints/api/handlers/get-property.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2022
+
+  CreatePropertyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-create-property"
+      Handler: src/entrypoints/api/handlers/create-property.handler
+      Role: !GetAtt CoreFunctionRole.Arn
+      Events:
+        CreatePropertyRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CoreHttpApi
+            Path: /v1/properties
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/entrypoints/api/handlers/create-property.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2022
+
+  UpdatePropertyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-update-property"
+      Handler: src/entrypoints/api/handlers/update-property.handler
+      Role: !GetAtt CoreFunctionRole.Arn
+      Events:
+        UpdatePropertyRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CoreHttpApi
+            Path: /v1/properties/{propertyId}
+            Method: PATCH
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/entrypoints/api/handlers/update-property.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2022
+
+  PublishOutboxFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-publish-outbox"
+      Handler: src/entrypoints/jobs/publish-outbox.handler
+      Role: !GetAtt CoreFunctionRole.Arn
+      # ReservedConcurrentExecutions is intentionally omitted.
+      # If we set it to 1, Lambda would cap this function at one concurrent
+      # invocation, effectively serializing publisher runs at the Lambda layer.
+      # We now rely on the Postgres outbox claim/lock flow for correctness
+      # instead of using Lambda concurrency as the primary protection.
+      Events:
+        PublishSchedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: !Ref PublisherScheduleExpression
+            State: !Ref PublisherScheduleState
+            Description: Publishes pending outbox rows to EventBridge.
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/entrypoints/jobs/publish-outbox.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2022
+
+  PostConfirmationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-post-confirmation"
+      Handler: src/entrypoints/cognito/post-confirmation.handler
+      Role: !GetAtt CoreFunctionRole.Arn
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/entrypoints/cognito/post-confirmation.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2022
+
+  CoreServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${ProjectName}/${EnvironmentName}/${ServiceName}"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  PostConfirmationErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-post-confirmation-errors"
+      AlarmDescription: Cognito PostConfirmation is failing.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub "${ServiceName}-${EnvironmentName}-post-confirmation"
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub "arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:${ProjectName}-${EnvironmentName}-alerts-critical"
+
+  PostConfirmationDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-post-confirmation-duration-high"
+      AlarmDescription: Cognito PostConfirmation is approaching the upstream timeout budget.
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub "${ServiceName}-${EnvironmentName}-post-confirmation"
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 4000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub "arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:${ProjectName}-${EnvironmentName}-alerts-standard"
+
+  PublishOutboxErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-publish-outbox-errors"
+      AlarmDescription: The outbox publisher has failed repeatedly.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub "${ServiceName}-${EnvironmentName}-publish-outbox"
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 3
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub "arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:${ProjectName}-${EnvironmentName}-alerts-critical"
+
+  PublishOutboxDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-publish-outbox-duration-high"
+      AlarmDescription: The outbox publisher is taking longer than expected.
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub "${ServiceName}-${EnvironmentName}-publish-outbox"
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 10000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub "arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:${ProjectName}-${EnvironmentName}-alerts-standard"
+
+Outputs:
+  CoreHttpApiId:
+    Description: HTTP API identifier for wumbo-core.
+    Value: !Ref CoreHttpApi
+  CoreHttpApiUrl:
+    Description: Base URL for the deployed HTTP API stage.
+    Value: !Sub "https://${CoreHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${EnvironmentName}"
+  CoreSecurityGroupId:
+    Description: Security group used by the core Lambdas.
+    Value: !Ref CoreSecurityGroup
+  PostConfirmationFunctionArn:
+    Description: ARN of the Cognito PostConfirmation handler.
+    Value: !GetAtt PostConfirmationFunction.Arn
