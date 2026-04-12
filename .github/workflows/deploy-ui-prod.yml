@@ -112,7 +112,12 @@ jobs:
               .registeredBy
             )
             | .containerDefinitions |= map(
-              if .name == "app" then .image = $image_uri else . end
+              if .name == "app" then
+                .image = $image_uri
+                | del(.command)
+              else
+                .
+              end
             )
           ' task-definition.json > task-definition.rendered.json
 
