@@ -72,3 +72,9 @@ variable "ui_target_group_arn_suffix" {
   default     = null
   nullable    = true
 }
+
+variable "ui_enabled" {
+  description = "Whether the shared dashboard and alarms should include the deployed UI service."
+  type        = bool
+  default     = false
+}

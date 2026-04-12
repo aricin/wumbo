@@ -31,7 +31,7 @@ locals {
     Layer       = "ui"
   })
 
-  github_deploy_role_enabled = var.github_repository != null && var.github_oidc_provider_arn != null
+  github_deploy_role_enabled = var.github_repository != null
   github_environment         = coalesce(var.github_environment, var.environment)
 
   ssm_parameter_arns = [
@@ -63,11 +63,12 @@ resource "aws_ecr_lifecycle_policy" "this" {
     rules = [
       {
         rulePriority = 1
-        description  = "Expire old tagged images."
+        description  = "Expire old commit-tagged images."
         selection = {
-          tagStatus   = "tagged"
-          countType   = "imageCountMoreThan"
-          countNumber = var.image_retention_count
+          tagStatus      = "tagged"
+          tagPatternList = ["sha-*"]
+          countType      = "imageCountMoreThan"
+          countNumber    = var.image_retention_count
         }
         action = {
           type = "expire"

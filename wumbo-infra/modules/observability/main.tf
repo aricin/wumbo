@@ -9,12 +9,7 @@ locals {
 
   post_confirmation_function_name = "${var.core_service_name}-${var.environment}-post-confirmation"
   publish_outbox_function_name    = "${var.core_service_name}-${var.environment}-publish-outbox"
-  ui_enabled = (
-    var.ui_cluster_name != null &&
-    var.ui_service_name != null &&
-    var.ui_alb_arn_suffix != null &&
-    var.ui_target_group_arn_suffix != null
-  )
+  ui_enabled                      = var.ui_enabled
 
   common_tags = merge(var.tags, {
     Project     = var.project_name
@@ -23,7 +18,7 @@ locals {
     Layer       = "observability"
   })
 
-  ui_widgets = local.ui_enabled ? tolist([
+  ui_widgets = jsondecode(local.ui_enabled ? jsonencode([
     {
       type   = "metric"
       x      = 0
@@ -80,7 +75,7 @@ locals {
         ]
       }
     },
-  ]) : tolist([])
+  ]) : "[]")
 }
 
 resource "aws_sns_topic" "standard" {

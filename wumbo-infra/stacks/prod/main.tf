@@ -164,6 +164,7 @@ module "observability" {
   parameter_prefix           = var.parameter_prefix
   db_instance_identifier     = module.database.db_instance_identifier
   alert_email_addresses      = var.alert_email_addresses
+  ui_enabled                 = true
   ui_cluster_name            = module.ecs_ui.cluster_name
   ui_service_name            = module.ecs_ui.service_name
   ui_alb_arn_suffix          = module.ecs_ui.alb_arn_suffix
