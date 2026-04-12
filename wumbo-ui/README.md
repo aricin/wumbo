@@ -45,6 +45,7 @@ Copy `.env.example` to `.env.local` and set:
 - `NEXT_PUBLIC_COGNITO_REDIRECT_URI`
 - `NEXT_PUBLIC_COGNITO_LOGOUT_URI`
 - `NEXT_PUBLIC_COGNITO_SCOPES`
+- optional `NEXT_PUBLIC_UI_BUILD_LABEL`
 
 Default local callback:
 
@@ -60,6 +61,7 @@ The production container:
 
 - builds Next.js with `output: "standalone"`
 - bakes the `NEXT_PUBLIC_*` Cognito values into the image at build time
+- can bake app-owned public build labels or similar `NEXT_PUBLIC_*` values from GitHub environment vars
 - serves the app on port `3000`
 - exposes `GET /healthz` for ECS and ALB health checks
 
@@ -72,6 +74,7 @@ docker build `
   --build-arg NEXT_PUBLIC_COGNITO_REDIRECT_URI=https://app.example.com/api/auth/callback `
   --build-arg NEXT_PUBLIC_COGNITO_LOGOUT_URI=https://app.example.com `
   --build-arg NEXT_PUBLIC_COGNITO_SCOPES="openid email profile" `
+  --build-arg NEXT_PUBLIC_UI_BUILD_LABEL=local `
   -t wumbo-ui:local .
 ```
 
@@ -87,6 +90,7 @@ The repo now includes these root-level workflows for the monorepo:
 - assume an AWS role through GitHub OIDC
 - read deploy metadata from SSM under `/<project>/<env>/...`
 - build an environment-specific image with the Cognito `NEXT_PUBLIC_*` values
+- optionally inject app-owned public `NEXT_PUBLIC_*` values from GitHub environment vars
 - push that image to the environment's ECR repository
 - register a new ECS task definition revision
 - update the existing ECS service and wait for stability
@@ -95,6 +99,7 @@ Expected GitHub Environment variables:
 
 - `AWS_ROLE_ARN` from the matching `wumbo-infra` stack output `ui_github_actions_role_arn`
 - optional `AWS_REGION` if you do not want the default `us-west-2`
+- optional `NEXT_PUBLIC_UI_BUILD_LABEL` for a GitHub-managed public build-time example value
 
 ## Scripts
 
@@ -123,6 +128,7 @@ src/
     utils/
 docs/
   FOUNDATION.md
+  CONFIGURATION.md
 ```
 
 ## Related Repos

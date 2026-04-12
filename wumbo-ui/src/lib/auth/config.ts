@@ -3,15 +3,17 @@ export interface AuthConfig {
   clientId?: string | undefined;
   redirectUri?: string | undefined;
   logoutUri?: string | undefined;
+  buildLabel?: string | undefined;
   scopes: string[];
 }
 
 export function getAuthConfig(): AuthConfig {
   return {
     cognitoDomain: normalizeUrl(process.env.NEXT_PUBLIC_COGNITO_DOMAIN),
-    clientId: readOptional("NEXT_PUBLIC_COGNITO_CLIENT_ID"),
-    redirectUri: readOptional("NEXT_PUBLIC_COGNITO_REDIRECT_URI"),
-    logoutUri: readOptional("NEXT_PUBLIC_COGNITO_LOGOUT_URI"),
+    clientId: readOptionalValue(process.env.NEXT_PUBLIC_COGNITO_CLIENT_ID),
+    redirectUri: readOptionalValue(process.env.NEXT_PUBLIC_COGNITO_REDIRECT_URI),
+    logoutUri: readOptionalValue(process.env.NEXT_PUBLIC_COGNITO_LOGOUT_URI),
+    buildLabel: readOptionalValue(process.env.NEXT_PUBLIC_UI_BUILD_LABEL),
     scopes: readScopes(),
   };
 }
@@ -37,10 +39,10 @@ function readScopes(): string[] {
     .filter((scope) => scope !== "");
 }
 
-function readOptional(name: string): string | undefined {
-  const value = process.env[name]?.trim();
+function readOptionalValue(value: string | undefined): string | undefined {
+  const trimmedValue = value?.trim();
 
-  return value ? value : undefined;
+  return trimmedValue ? trimmedValue : undefined;
 }
 
 function normalizeUrl(value: string | undefined): string | undefined {

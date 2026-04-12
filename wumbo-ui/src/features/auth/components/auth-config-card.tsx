@@ -29,6 +29,7 @@ export function AuthConfigCard({ config, hostedAuthReady }: AuthConfigCardProps)
             ["Redirect URI", config.redirectUri ?? "Missing"],
             ["Logout URI", config.logoutUri ?? "Missing"],
             ["Scopes", config.scopes.join(" ") || "Missing"],
+            ["UI build label", config.buildLabel ?? "Missing"],
           ]}
         />
 
@@ -37,7 +38,7 @@ export function AuthConfigCard({ config, hostedAuthReady }: AuthConfigCardProps)
         <div className="rounded-[24px] border border-dashed border-line bg-white/45 p-4 text-sm leading-6 text-olive-700">
           {hostedAuthReady
             ? "This is ready to validate Cognito managed sign-up, sign-in, callback handling, and the local browser session."
-            : "Finish the Cognito hosted-login domain and callback/logout values in wumbo-infra, then copy them into .env.local here."}
+            : "Finish the Cognito hosted-login domain and callback/logout values in deploy config for this environment, then try again."}
         </div>
       </CardContent>
     </Card>

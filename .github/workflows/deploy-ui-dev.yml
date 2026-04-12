@@ -79,6 +79,7 @@ jobs:
             --build-arg NEXT_PUBLIC_COGNITO_REDIRECT_URI="${{ steps.config.outputs.next_public_cognito_redirect_uri }}" \
             --build-arg NEXT_PUBLIC_COGNITO_LOGOUT_URI="${{ steps.config.outputs.next_public_cognito_logout_uri }}" \
             --build-arg NEXT_PUBLIC_COGNITO_SCOPES="openid email profile" \
+            --build-arg NEXT_PUBLIC_UI_BUILD_LABEL="${{ vars.NEXT_PUBLIC_UI_BUILD_LABEL }}" \
             --tag "$IMAGE_URI" \
             --tag "${{ steps.config.outputs.ecr_repository_url }}:latest" \
             wumbo-ui
