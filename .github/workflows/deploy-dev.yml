@@ -6,7 +6,7 @@ on:
       git_ref:
         description: Git ref to deploy to dev.
         required: true
-        default: main
+        default: dev
         type: string
 
 permissions:
