@@ -82,7 +82,7 @@ The repo now includes:
 - `.github/workflows/deploy-dev.yml`
 - `.github/workflows/deploy-prod.yml`
 
-Both workflows:
+`deploy-dev` uses the GitHub `dev` environment, `deploy-prod` uses `prod`, and both workflows are manually triggered from the GitHub Actions tab. They:
 
 - assume an AWS role through GitHub OIDC
 - read deploy metadata from SSM under `/<project>/<env>/...`

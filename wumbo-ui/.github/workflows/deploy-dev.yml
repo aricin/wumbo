@@ -1,9 +1,13 @@
 name: Deploy Dev
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: Git ref to deploy to dev.
+        required: true
+        default: main
+        type: string
 
 permissions:
   contents: read
@@ -24,6 +28,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
