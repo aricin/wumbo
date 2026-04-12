@@ -79,8 +79,8 @@ docker build `
 
 The repo now includes these root-level workflows for the monorepo:
 
-- `.github/workflows/deploy-dev.yml`
-- `.github/workflows/deploy-prod.yml`
+- `.github/workflows/deploy-ui-dev.yml`
+- `.github/workflows/deploy-ui-prod.yml`
 
 `deploy-dev` uses the GitHub `dev` environment, `deploy-prod` uses `prod`, and both workflows are manually triggered from the GitHub Actions tab. They:
 
