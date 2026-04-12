@@ -73,6 +73,7 @@ jobs:
 
           docker build \
             --platform linux/amd64 \
+            --file wumbo-ui/Dockerfile \
             --build-arg NEXT_PUBLIC_COGNITO_DOMAIN="${{ steps.config.outputs.next_public_cognito_domain }}" \
             --build-arg NEXT_PUBLIC_COGNITO_CLIENT_ID="${{ steps.config.outputs.next_public_cognito_client_id }}" \
             --build-arg NEXT_PUBLIC_COGNITO_REDIRECT_URI="${{ steps.config.outputs.next_public_cognito_redirect_uri }}" \
@@ -80,7 +81,7 @@ jobs:
             --build-arg NEXT_PUBLIC_COGNITO_SCOPES="openid email profile" \
             --tag "$IMAGE_URI" \
             --tag "${{ steps.config.outputs.ecr_repository_url }}:latest" \
-            .
+            wumbo-ui
 
           docker push "$IMAGE_URI"
           docker push "${{ steps.config.outputs.ecr_repository_url }}:latest"

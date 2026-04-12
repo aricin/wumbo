@@ -77,7 +77,7 @@ docker build `
 
 ## GitHub Actions Deploys
 
-The repo now includes:
+The repo now includes these root-level workflows for the monorepo:
 
 - `.github/workflows/deploy-dev.yml`
 - `.github/workflows/deploy-prod.yml`
