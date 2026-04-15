@@ -1,22 +1,27 @@
 data "aws_region" "current" {}
 
 locals {
-  parameter_prefix = trim(var.parameter_prefix != null ? var.parameter_prefix : "/${var.project_name}/${var.environment}", "/")
-  dashboard_name   = coalesce(var.dashboard_name, "${var.project_name}-${var.environment}-operations")
+  naming_prefix    = var.workload_name != null ? "${var.project_name}-${var.workload_name}-${var.environment}" : "${var.project_name}-${var.environment}"
+  parameter_prefix = trim(var.parameter_prefix != null ? var.parameter_prefix : (var.workload_name != null ? "/${var.project_name}/${var.workload_name}/${var.environment}" : "/${var.project_name}/${var.environment}"), "/")
+  dashboard_name   = coalesce(var.dashboard_name, "${local.naming_prefix}-operations")
 
-  standard_topic_name = "${var.project_name}-${var.environment}-alerts-standard"
-  critical_topic_name = "${var.project_name}-${var.environment}-alerts-critical"
+  standard_topic_name = "${local.naming_prefix}-alerts-standard"
+  critical_topic_name = "${local.naming_prefix}-alerts-critical"
 
   post_confirmation_function_name = "${var.core_service_name}-${var.environment}-post-confirmation"
   publish_outbox_function_name    = "${var.core_service_name}-${var.environment}-publish-outbox"
   ui_enabled                      = var.ui_enabled
 
-  common_tags = merge(var.tags, {
-    Project     = var.project_name
-    Environment = var.environment
-    ManagedBy   = "Terraform"
-    Layer       = "observability"
-  })
+  common_tags = merge(
+    var.tags,
+    {
+      Project     = var.project_name
+      Environment = var.environment
+      ManagedBy   = "Terraform"
+      Layer       = "observability"
+    },
+    var.workload_name != null ? { Workload = var.workload_name } : {},
+  )
 
   ui_widgets = jsondecode(local.ui_enabled ? jsonencode([
     {
@@ -132,7 +137,7 @@ resource "aws_ssm_parameter" "dashboard_name" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "database_cpu_high" {
-  alarm_name          = "${var.project_name}-${var.environment}-database-cpu-high"
+  alarm_name          = "${local.naming_prefix}-database-cpu-high"
   alarm_description   = "Database CPU has been high for 15 minutes."
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 3
@@ -151,7 +156,7 @@ resource "aws_cloudwatch_metric_alarm" "database_cpu_high" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "database_connections_high" {
-  alarm_name          = "${var.project_name}-${var.environment}-database-connections-high"
+  alarm_name          = "${local.naming_prefix}-database-connections-high"
   alarm_description   = "Database connections have stayed elevated for 15 minutes."
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 3
@@ -170,7 +175,7 @@ resource "aws_cloudwatch_metric_alarm" "database_connections_high" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "database_freeable_memory_low" {
-  alarm_name          = "${var.project_name}-${var.environment}-database-freeable-memory-low"
+  alarm_name          = "${local.naming_prefix}-database-freeable-memory-low"
   alarm_description   = "Database freeable memory has stayed low for 15 minutes."
   comparison_operator = "LessThanOrEqualToThreshold"
   evaluation_periods  = 3
@@ -189,7 +194,7 @@ resource "aws_cloudwatch_metric_alarm" "database_freeable_memory_low" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "database_free_storage_low" {
-  alarm_name          = "${var.project_name}-${var.environment}-database-free-storage-low"
+  alarm_name          = "${local.naming_prefix}-database-free-storage-low"
   alarm_description   = "Database free storage is critically low."
   comparison_operator = "LessThanOrEqualToThreshold"
   evaluation_periods  = 2
@@ -210,8 +215,8 @@ resource "aws_cloudwatch_metric_alarm" "database_free_storage_low" {
 resource "aws_cloudwatch_metric_alarm" "ui_cpu_high" {
   count = local.ui_enabled ? 1 : 0
 
-  alarm_name          = "${var.project_name}-${var.environment}-ui-cpu-high"
-  alarm_description   = "The wumbo-ui ECS service has sustained high CPU usage."
+  alarm_name          = "${local.naming_prefix}-ui-cpu-high"
+  alarm_description   = "The UI ECS service has sustained high CPU usage."
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 3
   datapoints_to_alarm = 3
@@ -232,8 +237,8 @@ resource "aws_cloudwatch_metric_alarm" "ui_cpu_high" {
 resource "aws_cloudwatch_metric_alarm" "ui_memory_high" {
   count = local.ui_enabled ? 1 : 0
 
-  alarm_name          = "${var.project_name}-${var.environment}-ui-memory-high"
-  alarm_description   = "The wumbo-ui ECS service has sustained high memory usage."
+  alarm_name          = "${local.naming_prefix}-ui-memory-high"
+  alarm_description   = "The UI ECS service has sustained high memory usage."
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 3
   datapoints_to_alarm = 3
@@ -254,8 +259,8 @@ resource "aws_cloudwatch_metric_alarm" "ui_memory_high" {
 resource "aws_cloudwatch_metric_alarm" "ui_target_response_time_high" {
   count = local.ui_enabled ? 1 : 0
 
-  alarm_name          = "${var.project_name}-${var.environment}-ui-target-response-time-high"
-  alarm_description   = "The wumbo-ui load balancer target response time is elevated."
+  alarm_name          = "${local.naming_prefix}-ui-target-response-time-high"
+  alarm_description   = "The UI load balancer target response time is elevated."
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 3
   datapoints_to_alarm = 3
@@ -276,8 +281,8 @@ resource "aws_cloudwatch_metric_alarm" "ui_target_response_time_high" {
 resource "aws_cloudwatch_metric_alarm" "ui_unhealthy_hosts" {
   count = local.ui_enabled ? 1 : 0
 
-  alarm_name          = "${var.project_name}-${var.environment}-ui-unhealthy-hosts"
-  alarm_description   = "One or more wumbo-ui targets are unhealthy."
+  alarm_name          = "${local.naming_prefix}-ui-unhealthy-hosts"
+  alarm_description   = "One or more UI targets are unhealthy."
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 2
   datapoints_to_alarm = 2
@@ -298,8 +303,8 @@ resource "aws_cloudwatch_metric_alarm" "ui_unhealthy_hosts" {
 resource "aws_cloudwatch_metric_alarm" "ui_target_5xx_high" {
   count = local.ui_enabled ? 1 : 0
 
-  alarm_name          = "${var.project_name}-${var.environment}-ui-target-5xx-high"
-  alarm_description   = "The wumbo-ui app is returning repeated 5xx responses."
+  alarm_name          = "${local.naming_prefix}-ui-target-5xx-high"
+  alarm_description   = "The UI app is returning repeated 5xx responses."
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 1
   datapoints_to_alarm = 1

@@ -22,7 +22,7 @@ The master password is generated with Terraform write-only arguments and stored 
 
 Connection details that are safe to share between repos are written to SSM under:
 
-`/<project>/<environment>/database/primary/*`
+`/<project>/<environment>/databases/<database_label>/*`
 
 That includes:
 
@@ -36,6 +36,7 @@ That includes:
 
 - `vpc_id`, `vpc_cidr`, `private_subnet_ids`: network placement
 - `db_name`, `db_username`, `db_port`: database basics
+- `database_label`: stable path/tag label such as `marketplace` or `identity`
 - `instance_class`, `engine_version`, `parameter_group_family`: compute and engine settings
 - `allocated_storage`, `max_allocated_storage`, `storage_type`, `iops`: storage settings
 - `multi_az`: availability setting
@@ -65,6 +66,8 @@ module "database" {
   vpc_id                 = module.network.vpc_id
   vpc_cidr               = module.network.vpc_cidr
   private_subnet_ids     = module.network.private_subnet_ids
+  database_label         = "marketplace"
+  db_identifier          = "wumbo-marketplace-dev-postgres"
   db_name                = "wumbo"
   db_username            = "wumbo"
   instance_class         = "db.t4g.micro"
@@ -78,4 +81,3 @@ module "database" {
 - This module expects Terraform `1.11+`.
 - By default, if `allowed_cidr_blocks` is not provided, the database security group allows PostgreSQL from the whole VPC CIDR.
 - For a tighter setup later, you will probably want to replace CIDR-based access with security-group-based access from app compute.
-

@@ -1,13 +1,18 @@
 locals {
-  parameter_prefix = trim(var.parameter_prefix != null ? var.parameter_prefix : "/${var.project_name}/${var.environment}", "/")
-  bus_name         = "${var.project_name}-${var.environment}-domain-events"
+  naming_prefix    = var.workload_name != null ? "${var.project_name}-${var.workload_name}-${var.environment}" : "${var.project_name}-${var.environment}"
+  parameter_prefix = trim(var.parameter_prefix != null ? var.parameter_prefix : (var.workload_name != null ? "/${var.project_name}/${var.workload_name}/${var.environment}" : "/${var.project_name}/${var.environment}"), "/")
+  bus_name         = "${local.naming_prefix}-domain-events"
 
-  common_tags = merge(var.tags, {
-    Project     = var.project_name
-    Environment = var.environment
-    ManagedBy   = "Terraform"
-    Layer       = "events"
-  })
+  common_tags = merge(
+    var.tags,
+    {
+      Project     = var.project_name
+      Environment = var.environment
+      ManagedBy   = "Terraform"
+      Layer       = "events"
+    },
+    var.workload_name != null ? { Workload = var.workload_name } : {},
+  )
 }
 
 resource "aws_cloudwatch_event_bus" "domain" {

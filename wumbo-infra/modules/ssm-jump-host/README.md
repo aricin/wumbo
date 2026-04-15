@@ -22,6 +22,7 @@ The instance gets outbound internet access through a public subnet so the SSM ag
 
 ## Key Inputs
 
+- optional `workload_name`
 - `subnet_id`: public subnet for the instance
 - `vpc_id`, `vpc_cidr`: network placement and private egress scope
 - `instance_type`: EC2 size for the jump host
@@ -54,3 +55,4 @@ Then connect your local DB client to `127.0.0.1:15432`.
 
 - This is intentionally the simple first pass, not the most locked-down final form.
 - A stricter future version would keep the jump host fully private and replace outbound internet with Systems Manager VPC endpoints.
+- When `workload_name` is set, the jump-host names and default SSM paths become workload-scoped, such as `wumbo-marketplace-dev-jump` and `/wumbo/marketplace/dev/ops/jump-host/*`.

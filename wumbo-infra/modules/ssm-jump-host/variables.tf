@@ -8,6 +8,13 @@ variable "environment" {
   type        = string
 }
 
+variable "workload_name" {
+  description = "Optional workload name used to scope jump-host resource names and SSM paths."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
 variable "subnet_id" {
   description = "Public subnet ID where the jump host will run."
   type        = string

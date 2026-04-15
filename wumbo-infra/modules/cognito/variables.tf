@@ -8,6 +8,12 @@ variable "environment" {
   type        = string
 }
 
+variable "service_name" {
+  description = "Service name used to scope Cognito resource names and SSM paths."
+  type        = string
+  default     = "identity"
+}
+
 variable "aws_region" {
   description = "AWS region used to build the Cognito issuer URL."
   type        = string

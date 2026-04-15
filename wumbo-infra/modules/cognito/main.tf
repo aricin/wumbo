@@ -1,23 +1,27 @@
 locals {
-  parameter_prefix             = trim(var.parameter_prefix != null ? var.parameter_prefix : "/${var.project_name}/${var.environment}", "/")
+  naming_prefix                = "${var.project_name}-${var.service_name}-${var.environment}"
+  parameter_prefix             = trim(var.parameter_prefix != null ? var.parameter_prefix : "/${var.project_name}/${var.service_name}/${var.environment}", "/")
   issuer_url                   = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.this.id}"
   ui_domain_prefix             = var.ui_domain_prefix != null && trimspace(var.ui_domain_prefix) != "" ? trimspace(var.ui_domain_prefix) : null
   ui_hosted_login_enabled      = local.ui_domain_prefix != null
   ui_domain_url                = local.ui_hosted_login_enabled ? "https://${local.ui_domain_prefix}.auth.${var.aws_region}.amazoncognito.com" : null
   post_confirmation_lambda_arn = var.post_confirmation_lambda_arn != null && trimspace(var.post_confirmation_lambda_arn) != "" ? trimspace(var.post_confirmation_lambda_arn) : null
 
-  common_tags = merge(var.tags, {
-    Project     = var.project_name
-    Environment = var.environment
-    ManagedBy   = "Terraform"
-    Layer       = "auth"
-  })
+  common_tags = merge(
+    var.tags,
+    {
+      Project     = var.project_name
+      Environment = var.environment
+      ManagedBy   = "Terraform"
+      Service     = var.service_name
+    },
+  )
 }
 
 data "aws_caller_identity" "current" {}
 
 resource "aws_cognito_user_pool" "this" {
-  name                     = "${var.project_name}-${var.environment}"
+  name                     = local.naming_prefix
   username_attributes      = ["email"]
   auto_verified_attributes = ["email"]
   deletion_protection      = var.deletion_protection ? "ACTIVE" : "INACTIVE"
@@ -52,7 +56,7 @@ resource "aws_cognito_user_pool" "this" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.project_name}-${var.environment}"
+    Name = local.naming_prefix
   })
 
   depends_on = [aws_lambda_permission.post_confirmation]
@@ -73,7 +77,7 @@ resource "aws_cognito_user_group" "customer" {
 }
 
 resource "aws_cognito_user_pool_client" "ui" {
-  name                                 = "${var.project_name}-${var.environment}-ui"
+  name                                 = "${local.naming_prefix}-ui"
   user_pool_id                         = aws_cognito_user_pool.this.id
   generate_secret                      = false
   prevent_user_existence_errors        = "ENABLED"
@@ -112,7 +116,7 @@ resource "aws_cognito_user_pool_client" "ui" {
 }
 
 resource "aws_cognito_user_pool_client" "admin" {
-  name                          = "${var.project_name}-${var.environment}-admin"
+  name                          = "${local.naming_prefix}-admin"
   user_pool_id                  = aws_cognito_user_pool.this.id
   generate_secret               = false
   prevent_user_existence_errors = "ENABLED"
@@ -140,7 +144,7 @@ resource "aws_cognito_user_pool_domain" "ui" {
 resource "aws_lambda_permission" "post_confirmation" {
   count = local.post_confirmation_lambda_arn != null ? 1 : 0
 
-  statement_id   = "${var.project_name}-${var.environment}-cognito-post-confirmation"
+  statement_id   = "${local.naming_prefix}-cognito-post-confirmation"
   action         = "lambda:InvokeFunction"
   function_name  = local.post_confirmation_lambda_arn
   principal      = "cognito-idp.amazonaws.com"
@@ -148,42 +152,42 @@ resource "aws_lambda_permission" "post_confirmation" {
 }
 
 resource "aws_ssm_parameter" "user_pool_id" {
-  name  = "/${local.parameter_prefix}/auth/cognito/user-pool-id"
+  name  = "/${local.parameter_prefix}/cognito/user-pool-id"
   type  = "String"
   value = aws_cognito_user_pool.this.id
   tags  = local.common_tags
 }
 
 resource "aws_ssm_parameter" "user_pool_arn" {
-  name  = "/${local.parameter_prefix}/auth/cognito/user-pool-arn"
+  name  = "/${local.parameter_prefix}/cognito/user-pool-arn"
   type  = "String"
   value = aws_cognito_user_pool.this.arn
   tags  = local.common_tags
 }
 
 resource "aws_ssm_parameter" "issuer_url" {
-  name  = "/${local.parameter_prefix}/auth/cognito/issuer-url"
+  name  = "/${local.parameter_prefix}/cognito/issuer-url"
   type  = "String"
   value = local.issuer_url
   tags  = local.common_tags
 }
 
 resource "aws_ssm_parameter" "ui_client_id" {
-  name  = "/${local.parameter_prefix}/auth/cognito/ui-client-id"
+  name  = "/${local.parameter_prefix}/cognito/ui-client-id"
   type  = "String"
   value = aws_cognito_user_pool_client.ui.id
   tags  = local.common_tags
 }
 
 resource "aws_ssm_parameter" "admin_client_id" {
-  name  = "/${local.parameter_prefix}/auth/cognito/admin-client-id"
+  name  = "/${local.parameter_prefix}/cognito/admin-client-id"
   type  = "String"
   value = aws_cognito_user_pool_client.admin.id
   tags  = local.common_tags
 }
 
 resource "aws_ssm_parameter" "jwt_audiences" {
-  name  = "/${local.parameter_prefix}/auth/cognito/jwt-audiences"
+  name  = "/${local.parameter_prefix}/cognito/jwt-audiences"
   type  = "StringList"
   value = join(",", [aws_cognito_user_pool_client.ui.id, aws_cognito_user_pool_client.admin.id])
   tags  = local.common_tags
@@ -192,7 +196,7 @@ resource "aws_ssm_parameter" "jwt_audiences" {
 resource "aws_ssm_parameter" "ui_domain_url" {
   count = local.ui_hosted_login_enabled ? 1 : 0
 
-  name  = "/${local.parameter_prefix}/auth/cognito/ui-domain-url"
+  name  = "/${local.parameter_prefix}/cognito/ui-domain-url"
   type  = "String"
   value = local.ui_domain_url
   tags  = local.common_tags
@@ -201,7 +205,7 @@ resource "aws_ssm_parameter" "ui_domain_url" {
 resource "aws_ssm_parameter" "ui_callback_urls" {
   count = local.ui_hosted_login_enabled ? 1 : 0
 
-  name  = "/${local.parameter_prefix}/auth/cognito/ui-callback-urls"
+  name  = "/${local.parameter_prefix}/cognito/ui-callback-urls"
   type  = "StringList"
   value = join(",", var.ui_callback_urls)
   tags  = local.common_tags
@@ -210,7 +214,7 @@ resource "aws_ssm_parameter" "ui_callback_urls" {
 resource "aws_ssm_parameter" "ui_logout_urls" {
   count = local.ui_hosted_login_enabled ? 1 : 0
 
-  name  = "/${local.parameter_prefix}/auth/cognito/ui-logout-urls"
+  name  = "/${local.parameter_prefix}/cognito/ui-logout-urls"
   type  = "StringList"
   value = join(",", var.ui_logout_urls)
   tags  = local.common_tags

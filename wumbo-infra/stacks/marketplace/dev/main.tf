@@ -3,20 +3,31 @@ provider "aws" {
 
   assume_role {
     role_arn     = "arn:aws:iam::${var.target_account_id}:role/${var.assume_role_name}"
-    session_name = "${var.project_name}-${var.environment}-stack"
+    session_name = "${var.project_name}-${local.workload_name}-${var.environment}-stack"
   }
 
   default_tags {
     tags = merge(var.tags, {
       Project     = var.project_name
       Environment = var.environment
+      Workload    = local.workload_name
       ManagedBy   = "Terraform"
-      Stack       = var.environment
+      Stack       = "${local.workload_name}-${var.environment}"
     })
   }
 }
 
 locals {
+  workload_name         = "marketplace"
+  identity_service_name = "identity"
+  ui_service_name       = "ui"
+  workload_parameter_prefix = trim(
+    var.parameter_prefix != null ? var.parameter_prefix : "/${var.project_name}/${local.workload_name}/${var.environment}",
+    "/",
+  )
+  identity_parameter_prefix = "/${var.project_name}/${local.identity_service_name}/${var.environment}"
+  ui_parameter_prefix       = "/${var.project_name}/${local.ui_service_name}/${var.environment}"
+
   ui_custom_domain_url = module.ecs_ui.custom_domain_url
 
   cognito_ui_callback_urls = local.ui_custom_domain_url != null ? [
@@ -33,6 +44,11 @@ moved {
   to   = module.ecs_ui
 }
 
+moved {
+  from = module.auth
+  to   = module.identity
+}
+
 check "jump_host_requires_public_subnet" {
   assert {
     condition     = !var.jump_host_enabled || length(module.network.public_subnet_ids) > 0
@@ -43,7 +59,7 @@ check "jump_host_requires_public_subnet" {
 check "ui_service_requires_two_public_subnets" {
   assert {
     condition     = length(module.network.public_subnet_ids) >= 2
-    error_message = "wumbo-ui requires at least two public subnets across distinct AZs for the internet-facing ALB."
+    error_message = "ui requires at least two public subnets across distinct AZs for the internet-facing ALB."
   }
 }
 
@@ -59,7 +75,7 @@ resource "aws_iam_openid_connect_provider" "github_actions" {
 }
 
 module "network" {
-  source = "../../modules/network"
+  source = "../../../modules/network"
 
   project_name            = var.project_name
   environment             = var.environment
@@ -72,15 +88,16 @@ module "network" {
   tags                    = var.tags
 }
 
-module "database" {
-  source = "../../modules/rds-postgres"
+module "marketplace_database" {
+  source = "../../../modules/rds-postgres"
 
   project_name                      = var.project_name
   environment                       = var.environment
   vpc_id                            = module.network.vpc_id
   vpc_cidr                          = module.network.vpc_cidr
   private_subnet_ids                = module.network.private_subnet_ids
-  parameter_prefix                  = var.parameter_prefix
+  parameter_prefix                  = local.workload_parameter_prefix
+  database_label                    = local.workload_name
   db_identifier                     = var.db_identifier
   db_name                           = var.db_name
   db_username                       = var.db_username
@@ -110,31 +127,34 @@ module "database" {
 }
 
 module "ecs_ui" {
-  source = "../../modules/ecs-ui"
+  source = "../../../modules/ecs-ui"
 
-  project_name             = var.project_name
-  environment              = var.environment
-  parameter_prefix         = var.parameter_prefix
-  vpc_id                   = module.network.vpc_id
-  vpc_cidr                 = module.network.vpc_cidr
-  public_subnet_ids        = module.network.public_subnet_ids
-  private_subnet_ids       = module.network.private_subnet_ids
-  domain_name              = var.ui_domain_name
-  route53_zone_id          = var.ui_route53_zone_id
-  certificate_arn          = var.ui_certificate_arn
-  deletion_protection      = true
-  github_repository        = var.ui_github_repository
-  github_oidc_provider_arn = aws_iam_openid_connect_provider.github_actions.arn
-  tags                     = var.tags
+  project_name              = var.project_name
+  environment               = var.environment
+  service_name              = local.ui_service_name
+  workload_name             = local.workload_name
+  parameter_prefix          = local.ui_parameter_prefix
+  identity_parameter_prefix = local.identity_parameter_prefix
+  vpc_id                    = module.network.vpc_id
+  vpc_cidr                  = module.network.vpc_cidr
+  public_subnet_ids         = module.network.public_subnet_ids
+  private_subnet_ids        = module.network.private_subnet_ids
+  domain_name               = var.ui_domain_name
+  route53_zone_id           = var.ui_route53_zone_id
+  certificate_arn           = var.ui_certificate_arn
+  github_repository         = var.ui_github_repository
+  github_oidc_provider_arn  = aws_iam_openid_connect_provider.github_actions.arn
+  tags                      = var.tags
 }
 
-module "auth" {
-  source = "../../modules/cognito"
+module "identity" {
+  source = "../../../modules/cognito"
 
   project_name                 = var.project_name
   environment                  = var.environment
+  service_name                 = local.identity_service_name
   aws_region                   = var.aws_region
-  parameter_prefix             = var.parameter_prefix
+  parameter_prefix             = local.identity_parameter_prefix
   allow_self_signup            = var.cognito_allow_self_signup
   deletion_protection          = var.cognito_deletion_protection
   admin_group_name             = var.cognito_admin_group_name
@@ -148,21 +168,23 @@ module "auth" {
 }
 
 module "events" {
-  source = "../../modules/eventbridge"
+  source = "../../../modules/eventbridge"
 
   project_name     = var.project_name
   environment      = var.environment
-  parameter_prefix = var.parameter_prefix
+  workload_name    = local.workload_name
+  parameter_prefix = local.workload_parameter_prefix
   tags             = var.tags
 }
 
 module "observability" {
-  source = "../../modules/observability"
+  source = "../../../modules/observability"
 
   project_name               = var.project_name
   environment                = var.environment
-  parameter_prefix           = var.parameter_prefix
-  db_instance_identifier     = module.database.db_instance_identifier
+  workload_name              = local.workload_name
+  parameter_prefix           = local.workload_parameter_prefix
+  db_instance_identifier     = module.marketplace_database.db_instance_identifier
   alert_email_addresses      = var.alert_email_addresses
   ui_enabled                 = true
   ui_cluster_name            = module.ecs_ui.cluster_name
@@ -174,15 +196,16 @@ module "observability" {
 
 module "jump_host" {
   count  = var.jump_host_enabled ? 1 : 0
-  source = "../../modules/ssm-jump-host"
+  source = "../../../modules/ssm-jump-host"
 
   project_name         = var.project_name
   environment          = var.environment
+  workload_name        = local.workload_name
   subnet_id            = length(module.network.public_subnet_ids) > 0 ? module.network.public_subnet_ids[0] : null
   vpc_id               = module.network.vpc_id
   vpc_cidr             = module.network.vpc_cidr
   instance_type        = var.jump_host_instance_type
   remote_port          = var.db_port
-  ssm_parameter_prefix = var.parameter_prefix
+  ssm_parameter_prefix = local.workload_parameter_prefix
   tags                 = var.tags
 }

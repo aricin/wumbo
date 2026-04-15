@@ -8,6 +8,13 @@ variable "environment" {
   type        = string
 }
 
+variable "workload_name" {
+  description = "Optional workload name used to scope EventBridge resource names and SSM paths."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
 variable "parameter_prefix" {
   description = "Optional SSM parameter prefix without leading or trailing slashes."
   type        = string

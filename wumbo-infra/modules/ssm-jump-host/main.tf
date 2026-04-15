@@ -4,15 +4,20 @@ data "aws_ssm_parameter" "ami" {
 
 locals {
   remote_cidrs     = length(var.remote_cidr_blocks) > 0 ? var.remote_cidr_blocks : [var.vpc_cidr]
-  parameter_prefix = trim(var.ssm_parameter_prefix != null ? var.ssm_parameter_prefix : "/${var.project_name}/${var.environment}", "/")
-  instance_name    = "${var.project_name}-${var.environment}-jump"
+  naming_prefix    = var.workload_name != null ? "${var.project_name}-${var.workload_name}-${var.environment}" : "${var.project_name}-${var.environment}"
+  parameter_prefix = trim(var.ssm_parameter_prefix != null ? var.ssm_parameter_prefix : (var.workload_name != null ? "/${var.project_name}/${var.workload_name}/${var.environment}" : "/${var.project_name}/${var.environment}"), "/")
+  instance_name    = "${local.naming_prefix}-jump"
 
-  common_tags = merge(var.tags, {
-    Project     = var.project_name
-    Environment = var.environment
-    ManagedBy   = "Terraform"
-    Layer       = "jump-host"
-  })
+  common_tags = merge(
+    var.tags,
+    {
+      Project     = var.project_name
+      Environment = var.environment
+      ManagedBy   = "Terraform"
+      Layer       = "jump-host"
+    },
+    var.workload_name != null ? { Workload = var.workload_name } : {},
+  )
 }
 
 data "aws_iam_policy_document" "assume_role" {

@@ -8,6 +8,8 @@ This repo now assumes:
 - your personal org and shared Terraform backend live somewhere else
 - `wumbo-infra` should focus on app infrastructure, not organization management
 
+See [docs/RESOURCE_NAMING.md](/C:/Users/adrot/Projects/wumbo/wumbo-infra/docs/RESOURCE_NAMING.md) for the naming policy used across shared environment resources, workload-shared resources, and service-owned resources.
+
 ## Layout
 
 ```text
@@ -21,8 +23,12 @@ modules/
   ssm-jump-host/
 
 stacks/
-  dev/
-  prod/
+  marketplace/
+    dev/
+    prod/
+  intelligence/
+    dev/
+    prod/
 ```
 
 ## Mental Model
@@ -38,6 +44,7 @@ stacks/
 - creates a custom EventBridge bus for internal domain events
 - writes the bus name and ARN to SSM so app and consumer repos can discover them
 - gives `wumbo-core` a stable target for transactional outbox publishing
+- uses workload-scoped naming, such as `wumbo-marketplace-dev-domain-events`
 
 `modules/rds-postgres`
 
@@ -55,18 +62,21 @@ stacks/
 - can subscribe email endpoints to both topics
 - adds a small first-pass RDS alarm set
 - creates a CloudWatch dashboard that covers critical core Lambdas, RDS, EventBridge `PutEvents`, and the deployed UI service
+- uses workload-scoped alerting names, such as `wumbo-marketplace-dev-alerts-standard`
 
 `modules/ssm-jump-host`
 
 - creates a tiny no-ingress EC2 instance for Session Manager-based access to private services
 - gives that instance outbound internet through a public subnet so SSM works without NAT or PrivateLink
 - keeps the database private while still giving you an operator access path
+- uses workload-scoped naming, such as `wumbo-marketplace-dev-jump`
 
 `modules/cognito`
 
 - creates a lean Cognito user pool and separate app clients for `wumbo-ui` and `wumbo-admin`
 - can optionally create a hosted-login domain and OAuth redirect config for `wumbo-ui`
-- writes stable auth config into SSM so `wumbo-core` and the UI repos can consume it later
+- writes stable identity config into SSM so `wumbo-core` and the UI repos can consume it later
+- uses service-scoped naming for identity-owned resources, such as `wumbo-identity-dev`
 
 `modules/ecs-ui`
 
@@ -75,13 +85,19 @@ stacks/
 - runs the UI tasks in private subnets behind a public ALB
 - supports rolling deployments with the ECS deployment circuit breaker enabled
 - can optionally create ACM + Route53 HTTPS wiring for the app domain
+- keeps app resources service-scoped while allowing the shared ECS cluster to be workload-scoped
 - intentionally bootstraps the ECS service at `0` desired tasks until the first real image is deployed from GitHub Actions
 
-`stacks/dev` and `stacks/prod`
+`stacks/marketplace/dev` and `stacks/marketplace/prod`
 
 - are the runnable Terraform roots
 - assume into the target account using `OrganizationAccountAccessRole`
 - compose the network, database, and jump-host modules with environment-specific settings
+
+`stacks/intelligence`
+
+- reserves space for future analytics, data processing, and ML roots
+- is intentionally placeholder-only until that workload has real infrastructure to own
 
 ## Why This Shape
 
@@ -92,7 +108,7 @@ stacks/
 
 ## Current Foundation
 
-Each environment stack currently creates:
+Each marketplace environment stack currently creates:
 
 - one VPC
 - two isolated private subnets across two AZs
@@ -102,7 +118,7 @@ Each environment stack currently creates:
 - one Cognito user pool
 - two Cognito app clients
 - one `wumbo-ui` ECR repository
-- one ECS cluster for app services
+- one workload-shared ECS cluster for marketplace app services
 - one ECS/Fargate service baseline for `wumbo-ui`
 - one public Application Load Balancer for `wumbo-ui`
 - one custom EventBridge domain bus
@@ -112,15 +128,19 @@ Each environment stack currently creates:
 - one KMS key for database storage and secrets
 - one Secrets Manager secret for the master password
 - one SSM jump host EC2 instance
-- SSM parameters under `/<project>/<environment>/database/primary/*`
-- SSM parameters under `/<project>/<environment>/auth/cognito/*`
+- SSM parameters under `/<project>/<workload>/<environment>/databases/marketplace/*`
+- marketplace DB identifiers and outputs use workload-specific names such as `wumbo-marketplace-dev-postgres`
+- SSM parameters under `/<project>/identity/<environment>/cognito/*`
+- SSM parameters under `/<project>/ui/<environment>/app/*`
+- EventBridge, observability, jump-host, and the shared ECS cluster use workload-scoped marketplace naming
+- Cognito uses identity service naming
 
 ## Apply Order
 
 Start with `dev`, then mirror to `prod` once you like the shape.
 
-1. `stacks/dev`
-2. `stacks/prod`
+1. `stacks/marketplace/dev`
+2. `stacks/marketplace/prod`
 
 ## Quick Start
 
@@ -132,7 +152,7 @@ For the local DB tunnel flow, install the AWS CLI and the Session Manager plugin
 ### 1. Configure the dev stack
 
 ```powershell
-cd stacks/dev
+cd stacks/marketplace/dev
 Copy-Item backend.hcl.example backend.hcl
 Copy-Item terraform.tfvars.example terraform.tfvars
 ```
@@ -158,7 +178,7 @@ terraform apply
 
 ### 2. Configure the prod stack
 
-Repeat the same process in `stacks/prod`.
+Repeat the same process in `stacks/marketplace/prod`.
 
 ## Developer DB Access
 
@@ -193,7 +213,7 @@ Set these values in the stack `terraform.tfvars` when you want that enabled:
 For local smoke testing, a good dev starting point is:
 
 ```hcl
-cognito_ui_domain_prefix = "replace-me-wumbo-dev-auth"
+cognito_ui_domain_prefix = "wumbo-identity-dev-auth"
 cognito_ui_callback_urls = ["http://localhost:3000/api/auth/callback"]
 cognito_ui_logout_urls   = ["http://localhost:3000"]
 ```
@@ -219,22 +239,22 @@ After apply, use these outputs to populate `wumbo-ui/.env.local`:
 - `cognito_ui_logout_urls`
 - `cognito_issuer_url`
 
-## Cognito PostConfirmation Trigger For wumbo-core
+## Cognito PostConfirmation Trigger For Identity
 
 The Cognito module can now optionally attach a PostConfirmation trigger to the
-user pool for `wumbo-core`.
+identity-owned user pool.
 
 Use this flow:
 
-1. deploy `wumbo-core`
-2. copy the `PostConfirmationFunctionArn` output from the SAM stack
+1. deploy the service that owns the Cognito trigger code, such as `wumbo-identity`
+2. copy the trigger Lambda ARN from that service stack
 3. set `cognito_post_confirmation_lambda_arn` in the matching Terraform stack
 4. run `terraform apply`
 
 Example for `dev`:
 
 ```hcl
-cognito_post_confirmation_lambda_arn = "arn:aws:lambda:us-west-2:222222222222:function:wumbo-core-dev-post-confirmation"
+cognito_post_confirmation_lambda_arn = "arn:aws:lambda:us-west-2:222222222222:function:wumbo-identity-dev-post-confirmation"
 ```
 
 Terraform will:
@@ -245,7 +265,7 @@ Terraform will:
 ## Domain Event Bus For wumbo-core
 
 Each environment stack now creates a custom EventBridge bus named
-`${project}-${environment}-domain-events`, such as `wumbo-dev-domain-events`.
+`${project}-${workload}-${environment}-domain-events`, such as `wumbo-marketplace-dev-domain-events`.
 
 Use these outputs when wiring `wumbo-core`:
 
@@ -254,16 +274,16 @@ Use these outputs when wiring `wumbo-core`:
 
 The bus metadata is also written to SSM under:
 
-- `/<project>/<environment>/events/domain/bus-name`
-- `/<project>/<environment>/events/domain/bus-arn`
+- `/<project>/<workload>/<environment>/events/domain/bus-name`
+- `/<project>/<workload>/<environment>/events/domain/bus-arn`
 
 ## Observability Baseline
 
 Each environment stack now also creates:
 
-- `${project}-${environment}-alerts-standard`
-- `${project}-${environment}-alerts-critical`
-- a CloudWatch dashboard named `${project}-${environment}-operations`
+- `${project}-${workload}-${environment}-alerts-standard`
+- `${project}-${workload}-${environment}-alerts-critical`
+- a CloudWatch dashboard named `${project}-${workload}-${environment}-operations`
 - first-pass UI alarms for ECS CPU/memory, ALB target latency, unhealthy hosts, and repeated target `5xx`
 
 Both SNS topics can subscribe the same set of email addresses through:
@@ -286,7 +306,7 @@ The UI baseline also now includes:
 - a dedicated CloudWatch Logs group for the ECS app container
 - ALB request/error/latency widgets on the shared operations dashboard
 - ECS CPU/memory widgets on the shared operations dashboard
-- SSM parameters under `/<project>/<environment>/ui/app/*` for the deploy workflow
+- SSM parameters under `/<project>/ui/<environment>/app/*` for the deploy workflow
 - a stack-local GitHub OIDC provider plus an optional `wumbo-ui` deploy role output when `ui_github_repository` is set
 
 ## NAT-backed Lambda Egress For wumbo-core
@@ -309,10 +329,10 @@ After apply, `wumbo-core` can continue to run inside private subnets while
 using NAT-backed outbound HTTPS.
 
 If `wumbo-core` reads the DB password from Secrets Manager at runtime, also copy
-the `db_kms_key_arn` output into the SAM deploy parameters so the Lambda role
+the `marketplace_db_kms_key_arn` output into the SAM deploy parameters so the Lambda role
 can decrypt the secret with least privilege.
 
-The domain prefix must be unique within the AWS region, so you will likely want something that includes your own handle.
+The domain prefix must be unique within the AWS region. Start with a neutral value such as `wumbo-identity-dev-auth`, and if that is already taken, append a non-personal suffix such as a team or account alias.
 
 ## Notes
 

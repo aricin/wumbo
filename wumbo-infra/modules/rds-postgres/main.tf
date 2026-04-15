@@ -1,5 +1,5 @@
 locals {
-  identifier       = coalesce(var.db_identifier, "${var.project_name}-${var.environment}-postgres")
+  identifier       = coalesce(var.db_identifier, "${var.project_name}-${var.database_label}-${var.environment}-postgres")
   parameter_prefix = trim(var.parameter_prefix != null ? var.parameter_prefix : "/${var.project_name}/${var.environment}", "/")
   allowed_cidrs    = length(var.allowed_cidr_blocks) > 0 ? var.allowed_cidr_blocks : [var.vpc_cidr]
 
@@ -8,6 +8,7 @@ locals {
     Environment = var.environment
     ManagedBy   = "Terraform"
     Layer       = "database"
+    Database    = var.database_label
   })
 
   parameter_group_parameters = var.slow_query_log_min_duration_ms == null ? [] : [
@@ -27,7 +28,7 @@ resource "aws_kms_key" "database" {
 }
 
 resource "aws_kms_alias" "database" {
-  name          = "alias/${var.project_name}/${var.environment}/database"
+  name          = "alias/${var.project_name}/${var.environment}/databases/${var.database_label}"
   target_key_id = aws_kms_key.database.key_id
 }
 
@@ -167,35 +168,35 @@ resource "aws_db_instance" "database" {
 }
 
 resource "aws_ssm_parameter" "database_host" {
-  name  = "/${local.parameter_prefix}/database/primary/host"
+  name  = "/${local.parameter_prefix}/databases/${var.database_label}/host"
   type  = "String"
   value = aws_db_instance.database.address
   tags  = local.common_tags
 }
 
 resource "aws_ssm_parameter" "database_port" {
-  name  = "/${local.parameter_prefix}/database/primary/port"
+  name  = "/${local.parameter_prefix}/databases/${var.database_label}/port"
   type  = "String"
   value = tostring(aws_db_instance.database.port)
   tags  = local.common_tags
 }
 
 resource "aws_ssm_parameter" "database_name" {
-  name  = "/${local.parameter_prefix}/database/primary/name"
+  name  = "/${local.parameter_prefix}/databases/${var.database_label}/name"
   type  = "String"
   value = var.db_name
   tags  = local.common_tags
 }
 
 resource "aws_ssm_parameter" "database_username" {
-  name  = "/${local.parameter_prefix}/database/primary/username"
+  name  = "/${local.parameter_prefix}/databases/${var.database_label}/username"
   type  = "String"
   value = var.db_username
   tags  = local.common_tags
 }
 
 resource "aws_ssm_parameter" "database_secret_arn" {
-  name  = "/${local.parameter_prefix}/database/primary/secret-arn"
+  name  = "/${local.parameter_prefix}/databases/${var.database_label}/secret-arn"
   type  = "String"
   value = aws_secretsmanager_secret.master_password.arn
   tags  = local.common_tags

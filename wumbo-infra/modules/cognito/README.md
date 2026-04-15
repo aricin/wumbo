@@ -1,6 +1,6 @@
 # cognito
 
-Minimal Cognito foundation for `wumbo`.
+Minimal Cognito foundation for the `identity` service.
 
 ## What It Does
 
@@ -16,12 +16,13 @@ This module creates:
 
 ## Why This Shape
 
-- keeps auth shared and environment-scoped
+- keeps identity-specific auth resources under a dedicated service boundary
 - gives `wumbo-ui`, `wumbo-admin`, and `wumbo-core` stable config values without Terraform remote-state coupling
 - lets you turn on browser login for `wumbo-ui` without forcing the same shape onto `wumbo-admin` yet
 
 ## Key Inputs
 
+- `service_name`
 - `aws_region`
 - `parameter_prefix`
 - `allow_self_signup`
@@ -50,3 +51,4 @@ This module creates:
 - Hosted login for `wumbo-ui` is only enabled when you provide a domain prefix plus callback/logout URLs.
 - The `admin` client is still left as a simpler direct-auth client for now so the UI pattern can be proven first.
 - If you provide `post_confirmation_lambda_arn`, the module grants Cognito permission to invoke that Lambda and attaches it to the user pool.
+- By default, resource names and SSM paths are service-scoped, such as `wumbo-identity-dev` and `/wumbo/identity/dev/cognito/*`.

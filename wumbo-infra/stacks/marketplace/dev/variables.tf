@@ -7,7 +7,7 @@ variable "project_name" {
 variable "environment" {
   description = "Environment name for this stack."
   type        = string
-  default     = "prod"
+  default     = "dev"
 }
 
 variable "aws_region" {
@@ -27,7 +27,7 @@ variable "assume_role_name" {
 }
 
 variable "parameter_prefix" {
-  description = "Optional SSM parameter prefix without leading or trailing slashes."
+  description = "Optional SSM parameter prefix without leading or trailing slashes. Defaults to /<project>/<workload>/<environment> for this stack."
   type        = string
   default     = null
   nullable    = true
@@ -163,19 +163,19 @@ variable "db_maintenance_window" {
 variable "db_deletion_protection" {
   description = "Whether deletion protection is enabled."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "db_skip_final_snapshot" {
   description = "Whether the database can be destroyed without a final snapshot."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "db_apply_immediately" {
   description = "Whether DB changes should be applied immediately."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "db_monitoring_interval" {
@@ -229,7 +229,7 @@ variable "cognito_allow_self_signup" {
 variable "cognito_deletion_protection" {
   description = "Whether Cognito deletion protection is enabled."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "cognito_admin_group_name" {

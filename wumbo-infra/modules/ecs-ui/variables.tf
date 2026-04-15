@@ -8,8 +8,22 @@ variable "environment" {
   type        = string
 }
 
+variable "workload_name" {
+  description = "Optional workload name used for shared runtime resources like the ECS cluster."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
 variable "parameter_prefix" {
   description = "Optional SSM parameter prefix without leading or trailing slashes."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "identity_parameter_prefix" {
+  description = "Optional SSM parameter prefix for identity-owned Cognito metadata."
   type        = string
   default     = null
   nullable    = true
@@ -18,7 +32,7 @@ variable "parameter_prefix" {
 variable "service_name" {
   description = "Logical service name for the deployed UI application."
   type        = string
-  default     = "wumbo-ui"
+  default     = "ui"
 }
 
 variable "repository_name" {

@@ -88,7 +88,8 @@ The repo now includes these root-level workflows for the monorepo:
 `deploy-dev` uses the GitHub `dev` environment, `deploy-prod` uses `prod`, and both workflows are manually triggered from the GitHub Actions tab. They:
 
 - assume an AWS role through GitHub OIDC
-- read deploy metadata from SSM under `/<project>/<env>/...`
+- read UI deploy metadata from SSM under `/<project>/ui/<env>/app/*`
+- read Cognito metadata from SSM under `/<project>/identity/<env>/cognito/*`
 - build an environment-specific image with the Cognito `NEXT_PUBLIC_*` values
 - optionally inject app-owned public `NEXT_PUBLIC_*` values from GitHub environment vars
 - push that image to the environment's ECR repository

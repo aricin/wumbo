@@ -5,15 +5,17 @@ data "aws_partition" "current" {}
 data "aws_region" "current" {}
 
 locals {
-  parameter_prefix = trim(var.parameter_prefix != null ? var.parameter_prefix : "/${var.project_name}/${var.environment}", "/")
+  parameter_prefix          = trim(var.parameter_prefix != null ? var.parameter_prefix : "/${var.project_name}/${var.service_name}/${var.environment}", "/")
+  identity_parameter_prefix = trim(var.identity_parameter_prefix != null ? var.identity_parameter_prefix : "/${var.project_name}/identity/${var.environment}", "/")
 
-  repository_name = coalesce(var.repository_name, var.service_name)
-  cluster_name    = coalesce(var.cluster_name, "${var.project_name}-${var.environment}-apps")
-  task_family     = "${var.project_name}-${var.environment}-${var.service_name}"
+  service_resource_prefix = "${var.project_name}-${var.service_name}-${var.environment}"
+  repository_name         = coalesce(var.repository_name, "${var.project_name}-${var.service_name}")
+  cluster_name            = coalesce(var.cluster_name, var.workload_name != null ? "${var.project_name}-${var.workload_name}-${var.environment}-apps" : "${var.project_name}-${var.environment}-apps")
+  task_family             = local.service_resource_prefix
 
-  alb_name          = "${var.project_name}-${var.environment}-${var.service_name}-alb"
-  target_group_name = "${var.project_name}-${var.environment}-${var.service_name}-tg"
-  log_group_name    = "/${var.project_name}/${var.environment}/${var.service_name}"
+  alb_name          = "${local.service_resource_prefix}-alb"
+  target_group_name = "${local.service_resource_prefix}-tg"
+  log_group_name    = "/${var.project_name}/${var.service_name}/${var.environment}"
 
   route53_validation_enabled = var.domain_name != null && var.route53_zone_id != null && var.certificate_arn == null
   https_enabled              = var.domain_name != null && (var.certificate_arn != null || local.route53_validation_enabled)
@@ -24,22 +26,29 @@ locals {
   custom_domain_url = local.https_enabled ? "https://${var.domain_name}" : null
   app_url           = local.custom_domain_url != null ? local.custom_domain_url : "http://${aws_lb.this.dns_name}"
 
-  common_tags = merge(var.tags, {
-    Project     = var.project_name
-    Environment = var.environment
-    ManagedBy   = "Terraform"
-    Layer       = "ui"
+  common_tags = merge(
+    var.tags,
+    {
+      Project     = var.project_name
+      Environment = var.environment
+      ManagedBy   = "Terraform"
+    },
+    var.workload_name != null ? { Workload = var.workload_name } : {},
+  )
+
+  service_tags = merge(local.common_tags, {
+    Service = var.service_name
   })
 
   github_deploy_role_enabled = var.github_repository != null
   github_environment         = coalesce(var.github_environment, var.environment)
 
   ssm_parameter_arns = [
-    "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${local.parameter_prefix}/ui/app/*",
-    "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${local.parameter_prefix}/auth/cognito/ui-domain-url",
-    "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${local.parameter_prefix}/auth/cognito/ui-client-id",
-    "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${local.parameter_prefix}/auth/cognito/ui-callback-urls",
-    "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${local.parameter_prefix}/auth/cognito/ui-logout-urls",
+    "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${local.parameter_prefix}/app/*",
+    "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${local.identity_parameter_prefix}/cognito/ui-domain-url",
+    "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${local.identity_parameter_prefix}/cognito/ui-client-id",
+    "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${local.identity_parameter_prefix}/cognito/ui-callback-urls",
+    "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${local.identity_parameter_prefix}/cognito/ui-logout-urls",
   ]
 }
 
@@ -51,7 +60,7 @@ resource "aws_ecr_repository" "this" {
     scan_on_push = true
   }
 
-  tags = merge(local.common_tags, {
+  tags = merge(local.service_tags, {
     Name = local.repository_name
   })
 }
@@ -82,7 +91,7 @@ resource "aws_cloudwatch_log_group" "this" {
   name              = local.log_group_name
   retention_in_days = var.log_retention_in_days
 
-  tags = merge(local.common_tags, {
+  tags = merge(local.service_tags, {
     Name = local.log_group_name
   })
 }
@@ -96,8 +105,8 @@ resource "aws_ecs_cluster" "this" {
 }
 
 resource "aws_security_group" "alb" {
-  name        = "${var.project_name}-${var.environment}-${var.service_name}-alb-sg"
-  description = "Security group for the wumbo-ui Application Load Balancer."
+  name        = "${local.service_resource_prefix}-alb-sg"
+  description = "Security group for the ${var.service_name} Application Load Balancer."
   vpc_id      = var.vpc_id
 
   ingress {
@@ -124,14 +133,14 @@ resource "aws_security_group" "alb" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = merge(local.common_tags, {
-    Name = "${var.project_name}-${var.environment}-${var.service_name}-alb-sg"
+  tags = merge(local.service_tags, {
+    Name = "${local.service_resource_prefix}-alb-sg"
   })
 }
 
 resource "aws_security_group" "service" {
-  name        = "${var.project_name}-${var.environment}-${var.service_name}-svc-sg"
-  description = "Security group for the wumbo-ui ECS tasks."
+  name        = "${local.service_resource_prefix}-svc-sg"
+  description = "Security group for the ${var.service_name} ECS tasks."
   vpc_id      = var.vpc_id
 
   ingress {
@@ -150,8 +159,8 @@ resource "aws_security_group" "service" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = merge(local.common_tags, {
-    Name = "${var.project_name}-${var.environment}-${var.service_name}-svc-sg"
+  tags = merge(local.service_tags, {
+    Name = "${local.service_resource_prefix}-svc-sg"
   })
 }
 
@@ -164,7 +173,7 @@ resource "aws_lb" "this" {
   idle_timeout               = 60
   enable_deletion_protection = var.deletion_protection
 
-  tags = merge(local.common_tags, {
+  tags = merge(local.service_tags, {
     Name = local.alb_name
   })
 }
@@ -187,7 +196,7 @@ resource "aws_lb_target_group" "this" {
     path                = var.health_check_path
   }
 
-  tags = merge(local.common_tags, {
+  tags = merge(local.service_tags, {
     Name = local.target_group_name
   })
 }
@@ -233,7 +242,7 @@ resource "aws_acm_certificate" "this" {
     create_before_destroy = true
   }
 
-  tags = merge(local.common_tags, {
+  tags = merge(local.service_tags, {
     Name = var.domain_name
   })
 }
@@ -292,7 +301,7 @@ resource "aws_route53_record" "app" {
 }
 
 resource "aws_iam_role" "execution" {
-  name = "${var.project_name}-${var.environment}-${var.service_name}-exec"
+  name = "${local.service_resource_prefix}-exec"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -307,8 +316,8 @@ resource "aws_iam_role" "execution" {
     ]
   })
 
-  tags = merge(local.common_tags, {
-    Name = "${var.project_name}-${var.environment}-${var.service_name}-exec"
+  tags = merge(local.service_tags, {
+    Name = "${local.service_resource_prefix}-exec"
   })
 }
 
@@ -318,7 +327,7 @@ resource "aws_iam_role_policy_attachment" "execution" {
 }
 
 resource "aws_iam_role" "task" {
-  name = "${var.project_name}-${var.environment}-${var.service_name}-task"
+  name = "${local.service_resource_prefix}-task"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -333,15 +342,15 @@ resource "aws_iam_role" "task" {
     ]
   })
 
-  tags = merge(local.common_tags, {
-    Name = "${var.project_name}-${var.environment}-${var.service_name}-task"
+  tags = merge(local.service_tags, {
+    Name = "${local.service_resource_prefix}-task"
   })
 }
 
 resource "aws_iam_role" "github_actions" {
   count = local.github_deploy_role_enabled ? 1 : 0
 
-  name = "${var.project_name}-${var.environment}-${var.service_name}-deploy"
+  name = "${local.service_resource_prefix}-deploy"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -362,15 +371,15 @@ resource "aws_iam_role" "github_actions" {
     ]
   })
 
-  tags = merge(local.common_tags, {
-    Name = "${var.project_name}-${var.environment}-${var.service_name}-deploy"
+  tags = merge(local.service_tags, {
+    Name = "${local.service_resource_prefix}-deploy"
   })
 }
 
 resource "aws_iam_role_policy" "github_actions" {
   count = local.github_deploy_role_enabled ? 1 : 0
 
-  name = "${var.project_name}-${var.environment}-${var.service_name}-deploy"
+  name = "${local.service_resource_prefix}-deploy"
   role = aws_iam_role.github_actions[0].id
 
   policy = jsonencode({
@@ -502,13 +511,13 @@ resource "aws_ecs_task_definition" "this" {
     },
   ])
 
-  tags = merge(local.common_tags, {
+  tags = merge(local.service_tags, {
     Name = local.task_family
   })
 }
 
 resource "aws_ecs_service" "this" {
-  name            = var.service_name
+  name            = local.service_resource_prefix
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.this.arn
   desired_count   = var.initial_desired_count
@@ -549,42 +558,42 @@ resource "aws_ecs_service" "this" {
     aws_lb_listener.https,
   ]
 
-  tags = merge(local.common_tags, {
-    Name = var.service_name
+  tags = merge(local.service_tags, {
+    Name = local.service_resource_prefix
   })
 }
 
 resource "aws_ssm_parameter" "repository_url" {
-  name  = "/${local.parameter_prefix}/ui/app/ecr-repository-url"
+  name  = "/${local.parameter_prefix}/app/ecr-repository-url"
   type  = "String"
   value = aws_ecr_repository.this.repository_url
-  tags  = local.common_tags
+  tags  = local.service_tags
 }
 
 resource "aws_ssm_parameter" "cluster_name" {
-  name  = "/${local.parameter_prefix}/ui/app/ecs-cluster-name"
+  name  = "/${local.parameter_prefix}/app/ecs-cluster-name"
   type  = "String"
   value = aws_ecs_cluster.this.name
-  tags  = local.common_tags
+  tags  = local.service_tags
 }
 
 resource "aws_ssm_parameter" "service_name" {
-  name  = "/${local.parameter_prefix}/ui/app/ecs-service-name"
+  name  = "/${local.parameter_prefix}/app/ecs-service-name"
   type  = "String"
   value = aws_ecs_service.this.name
-  tags  = local.common_tags
+  tags  = local.service_tags
 }
 
 resource "aws_ssm_parameter" "task_family" {
-  name  = "/${local.parameter_prefix}/ui/app/ecs-task-family"
+  name  = "/${local.parameter_prefix}/app/ecs-task-family"
   type  = "String"
   value = aws_ecs_task_definition.this.family
-  tags  = local.common_tags
+  tags  = local.service_tags
 }
 
 resource "aws_ssm_parameter" "app_url" {
-  name  = "/${local.parameter_prefix}/ui/app/base-url"
+  name  = "/${local.parameter_prefix}/app/base-url"
   type  = "String"
   value = local.app_url
-  tags  = local.common_tags
+  tags  = local.service_tags
 }

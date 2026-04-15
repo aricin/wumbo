@@ -1,10 +1,15 @@
+output "parameter_prefix" {
+  description = "Resolved SSM parameter prefix used for UI deploy metadata."
+  value       = "/${local.parameter_prefix}"
+}
+
 output "repository_name" {
-  description = "Name of the ECR repository that stores wumbo-ui images."
+  description = "Name of the ECR repository that stores the UI service images."
   value       = aws_ecr_repository.this.name
 }
 
 output "repository_url" {
-  description = "Repository URL for pushing wumbo-ui images."
+  description = "Repository URL for pushing the UI service images."
   value       = aws_ecr_repository.this.repository_url
 }
 
@@ -34,7 +39,7 @@ output "task_role_arn" {
 }
 
 output "github_actions_role_arn" {
-  description = "IAM role ARN assumed by the wumbo-ui GitHub Actions deploy workflow, if configured."
+  description = "IAM role ARN assumed by the UI GitHub Actions deploy workflow, if configured."
   value       = local.github_deploy_role_enabled ? aws_iam_role.github_actions[0].arn : null
 }
 

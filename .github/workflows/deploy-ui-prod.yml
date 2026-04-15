@@ -23,7 +23,8 @@ jobs:
     environment: prod
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
-      PARAMETER_PREFIX: /wumbo/prod
+      UI_PARAMETER_PREFIX: /wumbo/ui/prod
+      IDENTITY_PARAMETER_PREFIX: /wumbo/identity/prod
       DESIRED_COUNT: "2"
     steps:
       - name: Check out source
@@ -50,14 +51,14 @@ jobs:
               --output text
           }
 
-          echo "ecr_repository_url=$(get_param "$PARAMETER_PREFIX/ui/app/ecr-repository-url")" >> "$GITHUB_OUTPUT"
-          echo "ecs_cluster_name=$(get_param "$PARAMETER_PREFIX/ui/app/ecs-cluster-name")" >> "$GITHUB_OUTPUT"
-          echo "ecs_service_name=$(get_param "$PARAMETER_PREFIX/ui/app/ecs-service-name")" >> "$GITHUB_OUTPUT"
-          echo "ecs_task_family=$(get_param "$PARAMETER_PREFIX/ui/app/ecs-task-family")" >> "$GITHUB_OUTPUT"
-          echo "next_public_cognito_domain=$(get_param "$PARAMETER_PREFIX/auth/cognito/ui-domain-url")" >> "$GITHUB_OUTPUT"
-          echo "next_public_cognito_client_id=$(get_param "$PARAMETER_PREFIX/auth/cognito/ui-client-id")" >> "$GITHUB_OUTPUT"
-          echo "next_public_cognito_redirect_uri=$(get_param "$PARAMETER_PREFIX/auth/cognito/ui-callback-urls" | cut -d',' -f1)" >> "$GITHUB_OUTPUT"
-          echo "next_public_cognito_logout_uri=$(get_param "$PARAMETER_PREFIX/auth/cognito/ui-logout-urls" | cut -d',' -f1)" >> "$GITHUB_OUTPUT"
+          echo "ecr_repository_url=$(get_param "$UI_PARAMETER_PREFIX/app/ecr-repository-url")" >> "$GITHUB_OUTPUT"
+          echo "ecs_cluster_name=$(get_param "$UI_PARAMETER_PREFIX/app/ecs-cluster-name")" >> "$GITHUB_OUTPUT"
+          echo "ecs_service_name=$(get_param "$UI_PARAMETER_PREFIX/app/ecs-service-name")" >> "$GITHUB_OUTPUT"
+          echo "ecs_task_family=$(get_param "$UI_PARAMETER_PREFIX/app/ecs-task-family")" >> "$GITHUB_OUTPUT"
+          echo "next_public_cognito_domain=$(get_param "$IDENTITY_PARAMETER_PREFIX/cognito/ui-domain-url")" >> "$GITHUB_OUTPUT"
+          echo "next_public_cognito_client_id=$(get_param "$IDENTITY_PARAMETER_PREFIX/cognito/ui-client-id")" >> "$GITHUB_OUTPUT"
+          echo "next_public_cognito_redirect_uri=$(get_param "$IDENTITY_PARAMETER_PREFIX/cognito/ui-callback-urls" | cut -d',' -f1)" >> "$GITHUB_OUTPUT"
+          echo "next_public_cognito_logout_uri=$(get_param "$IDENTITY_PARAMETER_PREFIX/cognito/ui-logout-urls" | cut -d',' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2

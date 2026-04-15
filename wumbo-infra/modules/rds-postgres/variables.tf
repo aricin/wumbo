@@ -30,8 +30,14 @@ variable "parameter_prefix" {
   nullable    = true
 }
 
+variable "database_label" {
+  description = "Stable label used in SSM metadata paths and tags for this database workload."
+  type        = string
+  default     = "primary"
+}
+
 variable "db_identifier" {
-  description = "Optional DB instance identifier. Defaults to a project/environment derived value."
+  description = "Optional DB instance identifier. Defaults to a project/workload/environment derived value."
   type        = string
   default     = null
   nullable    = true

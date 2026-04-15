@@ -1,5 +1,5 @@
 bucket         = "replace-me-shared-terraform-state"
-key            = "wumbo/prod/terraform.tfstate"
+key            = "wumbo/marketplace/prod/terraform.tfstate"
 region         = "us-west-2"
 dynamodb_table = "replace-me-shared-terraform-locks"
 encrypt        = true
