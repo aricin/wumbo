@@ -44,6 +44,12 @@ Parameters:
   CognitoAudiences:
     Type: CommaDelimitedList
     Default: ""
+  StandardAlertsTopicArn:
+    Type: String
+    Default: ""
+  CriticalAlertsTopicArn:
+    Type: String
+    Default: ""
   PublisherScheduleExpression:
     Type: String
     Default: rate(1 minute)
@@ -69,6 +75,8 @@ Conditions:
     - !Not [!Equals [!Join ["", !Ref CognitoAudiences], ""]]
   UseDatabaseSecretKmsKey: !Not [!Equals [!Ref DatabaseSecretKmsKeyArn, ""]]
   UseEventBus: !Not [!Equals [!Ref EventBusName, ""]]
+  UseStandardAlertsTopic: !Not [!Equals [!Ref StandardAlertsTopicArn, ""]]
+  UseCriticalAlertsTopic: !Not [!Equals [!Ref CriticalAlertsTopicArn, ""]]
 
 Globals:
   Function:
@@ -468,7 +476,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Sub "arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:${ProjectName}-${EnvironmentName}-alerts-critical"
+        - !If [UseCriticalAlertsTopic, !Ref CriticalAlertsTopicArn, !Ref AWS::NoValue]
 
   PostConfirmationDurationAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -488,7 +496,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Sub "arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:${ProjectName}-${EnvironmentName}-alerts-standard"
+        - !If [UseStandardAlertsTopic, !Ref StandardAlertsTopicArn, !Ref AWS::NoValue]
 
   PublishOutboxErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -508,7 +516,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Sub "arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:${ProjectName}-${EnvironmentName}-alerts-critical"
+        - !If [UseCriticalAlertsTopic, !Ref CriticalAlertsTopicArn, !Ref AWS::NoValue]
 
   PublishOutboxDurationAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -528,7 +536,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Sub "arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:${ProjectName}-${EnvironmentName}-alerts-standard"
+        - !If [UseStandardAlertsTopic, !Ref StandardAlertsTopicArn, !Ref AWS::NoValue]
 
 Outputs:
   CoreHttpApiId:

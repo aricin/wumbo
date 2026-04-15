@@ -187,11 +187,11 @@ Current user lifecycle path:
 - npm
 - AWS SAM CLI
 - Docker, if you want to use `sam local`
-- access to the `wumbo-dev` database and Cognito resources from `wumbo-infra`
+- access to the `marketplace/dev` database and `identity/dev` Cognito resources from `wumbo-infra`
 
 If you are working against the shared dev database, first follow the `wumbo-infra` setup so:
 
-- `wumbo-dev` infrastructure is applied
+- `marketplace/dev` infrastructure is applied
 - the SSM jump host works
 - the private subnets have NAT-backed outbound HTTPS if deployed Lambdas need AWS public APIs or third-party services
 - you can tunnel to the RDS instance locally
@@ -221,8 +221,8 @@ APP_ENV=dev
 SERVICE_NAME=wumbo-core
 DB_HOST=127.0.0.1
 DB_PORT=15432
-DB_NAME=wumbo
-DB_USER=wumbo
+DB_NAME=marketplace
+DB_USER=wumbo_marketplace
 DB_PASSWORD=replace-me
 DB_SSL_ENABLED=true
 ALLOW_DEV_IDENTITY_HEADER=true
@@ -233,7 +233,7 @@ PUBLISHER_BATCH_SIZE=10
 You can also use:
 
 ```env
-DATABASE_URL=postgresql://wumbo:replace-me@127.0.0.1:15432/wumbo?sslmode=require
+DATABASE_URL=postgresql://wumbo_marketplace:replace-me@127.0.0.1:15432/marketplace?sslmode=require
 ```
 
 ### Sanity Check the Codebase
@@ -291,7 +291,7 @@ In practice, the current fastest feedback loop is:
 
 1. typecheck locally
 2. run migrations against the dev DB tunnel
-3. deploy to `wumbo-dev`
+3. deploy `wumbo-core-dev` against the applied `marketplace/dev` infrastructure
 4. smoke test with `wumbo-ui` + Cognito
 
 ### Deploy Parameter Notes
@@ -303,13 +303,13 @@ single NAT gateway, `wumbo-core` can use outbound HTTPS for both:
 - third-party APIs such as geocoding providers
 
 When you deploy `wumbo-core`, also pass the database KMS key ARN from the
-`wumbo-infra` stack output `db_kms_key_arn` into the SAM parameter
+`wumbo-infra` stack output `marketplace_db_kms_key_arn` into the SAM parameter
 `DatabaseSecretKmsKeyArn`. That lets the Lambda role decrypt the DB master
 secret with least privilege.
 
 The EventBridge publisher also expects the custom domain bus name from the
 `wumbo-infra` stack output `event_bus_name`. In `dev`, that bus name resolves
-to `wumbo-dev-domain-events`.
+to `wumbo-marketplace-dev-domain-events`.
 
 This stack now also enables:
 
@@ -318,10 +318,11 @@ This stack now also enables:
 - first-pass CloudWatch alarms for `PostConfirmation` and `PublishOutbox`
 
 Those alarms assume the shared infra topics exist in the same account and
-region with these names:
+region and are passed into the SAM deploy as topic ARNs. In the current
+`marketplace/dev` setup, those resolve to:
 
-- `wumbo-<env>-alerts-standard`
-- `wumbo-<env>-alerts-critical`
+- `arn:aws:sns:us-west-2:<account-id>:wumbo-marketplace-<env>-alerts-standard`
+- `arn:aws:sns:us-west-2:<account-id>:wumbo-marketplace-<env>-alerts-critical`
 
 ## Current Tooling
 
@@ -348,4 +349,4 @@ The next big gap is implementation, not documentation:
 
 - seed data
 - EventBridge publisher behavior
-- deploy/test loops against `wumbo-dev`
+- deploy/test loops against `wumbo-core-dev` in `marketplace/dev`

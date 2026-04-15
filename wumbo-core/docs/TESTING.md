@@ -110,7 +110,7 @@ What to test:
 
 Location:
 
-- deployed `wumbo-dev`
+- deployed `wumbo-core-dev` against the applied `marketplace/dev` infrastructure
 
 What to test:
 

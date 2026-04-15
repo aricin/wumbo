@@ -20,11 +20,11 @@ function buildDatabaseUrl() {
     return directUrl;
   }
 
-  const host = process.env.DB_HOST?.trim() || "127.0.0.1";
-  const port = process.env.DB_PORT?.trim() ?? "5432";
-  const database = process.env.DB_NAME?.trim() || "wumbo";
-  const user = process.env.DB_USER?.trim() || "wumbo";
-  const password = process.env.DB_PASSWORD?.trim() || "wumbo";
+  const host = requireEnv("DB_HOST");
+  const port = requireEnv("DB_PORT");
+  const database = requireEnv("DB_NAME");
+  const user = requireEnv("DB_USER");
+  const password = requireEnv("DB_PASSWORD");
   const sslEnabled = (process.env.DB_SSL_ENABLED ?? "true").trim() === "true";
 
   const url = new URL(`postgresql://${host}`);
@@ -35,4 +35,14 @@ function buildDatabaseUrl() {
   url.searchParams.set("sslmode", sslEnabled ? "require" : "disable");
 
   return url.toString();
+}
+
+function requireEnv(name) {
+  const value = process.env[name]?.trim();
+
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+
+  return value;
 }

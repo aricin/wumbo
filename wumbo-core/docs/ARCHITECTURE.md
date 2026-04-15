@@ -422,7 +422,7 @@ The reference implementation now follows this structure:
    - public/private profiles
    - one owned property
 3. Add domain, adapter, and API test suites around the profile/property permission matrix.
-4. Deploy the refactored handlers to `wumbo-dev` and run the Cognito + `wumbo-ui` smoke flow end to end.
+4. Deploy the refactored handlers to `wumbo-core-dev` against `marketplace/dev` and run the Cognito + `wumbo-ui` smoke flow end to end.
 5. Verify the core permission paths:
    - owner property update
    - non-owner property denial
