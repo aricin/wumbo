@@ -49,6 +49,11 @@ moved {
   to   = module.identity
 }
 
+moved {
+  from = module.marketplace_database
+  to   = module.marketplace_postgres
+}
+
 check "jump_host_requires_public_subnet" {
   assert {
     condition     = !var.jump_host_enabled || length(module.network.public_subnet_ids) > 0
@@ -88,7 +93,7 @@ module "network" {
   tags                    = var.tags
 }
 
-module "marketplace_database" {
+module "marketplace_postgres" {
   source = "../../../modules/rds-postgres"
 
   project_name                      = var.project_name
@@ -185,7 +190,7 @@ module "observability" {
   environment                = var.environment
   workload_name              = local.workload_name
   parameter_prefix           = local.workload_parameter_prefix
-  db_instance_identifier     = module.marketplace_database.db_instance_identifier
+  db_instance_identifier     = module.marketplace_postgres.db_instance_identifier
   alert_email_addresses      = var.alert_email_addresses
   ui_enabled                 = true
   ui_cluster_name            = module.ecs_ui.cluster_name

@@ -210,7 +210,7 @@ The simplest current path is:
 
 1. start the SSM tunnel from the `wumbo-infra` workflow
 2. point local DB access at `127.0.0.1:15432`
-3. use the RDS master password or another dev credential from Secrets Manager
+3. use the `core` service credential from Secrets Manager after running the shared Postgres provisioner
 
 The migration tooling reads either `DATABASE_URL` or the individual `DB_*` variables.
 
@@ -221,8 +221,8 @@ APP_ENV=dev
 SERVICE_NAME=wumbo-core
 DB_HOST=127.0.0.1
 DB_PORT=15432
-DB_NAME=marketplace
-DB_USER=wumbo_marketplace
+DB_NAME=core
+DB_USER=core
 DB_PASSWORD=replace-me
 DB_SSL_ENABLED=true
 ALLOW_DEV_IDENTITY_HEADER=true
@@ -233,7 +233,7 @@ PUBLISHER_BATCH_SIZE=10
 You can also use:
 
 ```env
-DATABASE_URL=postgresql://wumbo_marketplace:replace-me@127.0.0.1:15432/marketplace?sslmode=require
+DATABASE_URL=postgresql://core:replace-me@127.0.0.1:15432/core?sslmode=require
 ```
 
 ### Sanity Check the Codebase
@@ -284,7 +284,7 @@ npm run local:api
 This is most useful once you have the needed template parameters available from `wumbo-infra`, such as:
 
 - VPC/subnet values
-- DB host/name/user/secret
+- `core` DB host/name/user/secret from `/wumbo/core/<env>/databases/core/*`
 - Cognito issuer and audiences
 
 In practice, the current fastest feedback loop is:
@@ -303,9 +303,13 @@ single NAT gateway, `wumbo-core` can use outbound HTTPS for both:
 - third-party APIs such as geocoding providers
 
 When you deploy `wumbo-core`, also pass the database KMS key ARN from the
-`wumbo-infra` stack output `marketplace_db_kms_key_arn` into the SAM parameter
-`DatabaseSecretKmsKeyArn`. That lets the Lambda role decrypt the DB master
-secret with least privilege.
+`wumbo-infra` stack output `marketplace_postgres_kms_key_arn` into the SAM
+parameter `DatabaseSecretKmsKeyArn`. That lets the Lambda role decrypt the
+service-owned `core` DB secret with least privilege.
+
+The `DatabaseSecretArn` deploy parameter should come from the service-owned SSM
+path `/wumbo/core/<env>/databases/core/secret-arn` after the shared Postgres
+provisioner has run.
 
 The EventBridge publisher also expects the custom domain bus name from the
 `wumbo-infra` stack output `event_bus_name`. In `dev`, that bus name resolves

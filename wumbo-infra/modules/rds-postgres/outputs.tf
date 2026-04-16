@@ -23,11 +23,6 @@ output "db_port" {
   value       = aws_db_instance.database.port
 }
 
-output "db_name" {
-  description = "Initial database name."
-  value       = var.db_name
-}
-
 output "db_security_group_id" {
   description = "Security group attached to the RDS instance."
   value       = aws_security_group.database.id

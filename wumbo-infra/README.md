@@ -9,6 +9,7 @@ This repo now assumes:
 - `wumbo-infra` should focus on app infrastructure, not organization management
 
 See [docs/RESOURCE_NAMING.md](/C:/Users/adrot/Projects/wumbo/wumbo-infra/docs/RESOURCE_NAMING.md) for the naming policy used across shared environment resources, workload-shared resources, and service-owned resources.
+See [docs/POSTGRES_PROVISIONING.md](/C:/Users/adrot/Projects/wumbo/wumbo-infra/docs/POSTGRES_PROVISIONING.md) for the shared Postgres provisioning model used for service-owned logical databases.
 
 ## Layout
 
@@ -21,6 +22,8 @@ modules/
   observability/
   rds-postgres/
   ssm-jump-host/
+scripts/
+  postgres/
 
 stacks/
   marketplace/
@@ -53,8 +56,9 @@ stacks/
 - stores the master password in Secrets Manager
 - exports PostgreSQL logs to CloudWatch and keeps them for 30 days by default
 - enables slow-query logging with a `1000ms` threshold by default
-- writes non-sensitive connection metadata to SSM so other repos can consume it later
+- writes shared datastore metadata to SSM under the workload namespace
 - keeps the DB password out of Terraform state by using Terraform write-only arguments
+- intentionally stops at the shared RDS instance boundary; service-owned logical databases are provisioned separately after `terraform apply`
 
 `modules/observability`
 
@@ -115,6 +119,7 @@ Each marketplace environment stack currently creates:
 - two public subnets for the internet-facing ALB and the no-ingress jump host
 - one optional single NAT gateway for private subnet outbound HTTPS
 - one standard RDS PostgreSQL instance
+- no extra workload-level application database inside that instance
 - one Cognito user pool
 - two Cognito app clients
 - one `wumbo-ui` ECR repository
@@ -128,8 +133,8 @@ Each marketplace environment stack currently creates:
 - one KMS key for database storage and secrets
 - one Secrets Manager secret for the master password
 - one SSM jump host EC2 instance
-- SSM parameters under `/<project>/<workload>/<environment>/databases/marketplace/*`
-- marketplace DB identifiers and outputs use workload-specific names such as `wumbo-marketplace-dev-postgres`
+- SSM parameters under `/<project>/<workload>/<environment>/databases/marketplace/*` that describe the shared marketplace datastore namespace
+- marketplace Postgres identifiers and outputs use workload-specific names such as `wumbo-marketplace-dev-postgres`
 - SSM parameters under `/<project>/identity/<environment>/cognito/*`
 - SSM parameters under `/<project>/ui/<environment>/app/*`
 - EventBridge, observability, jump-host, and the shared ECS cluster use workload-scoped marketplace naming
@@ -147,7 +152,8 @@ Start with `dev`, then mirror to `prod` once you like the shape.
 This repo expects a remote backend to already exist, often in a separate personal/shared infra repo.
 
 Use Terraform `1.11+` because the database module relies on write-only arguments for secrets.
-For the local DB tunnel flow, install the AWS CLI and the Session Manager plugin on your machine.
+For the local DB tunnel flow and manual Postgres provisioning, install the AWS
+CLI, the Session Manager plugin, and `psql` on your machine.
 
 ### 1. Configure the dev stack
 
@@ -176,6 +182,10 @@ terraform init -backend-config=backend.hcl
 terraform apply
 ```
 
+After the shared infrastructure is applied, start the DB tunnel and run the
+logical database provisioner before deploying service repos. See
+[docs/POSTGRES_PROVISIONING.md](/C:/Users/adrot/Projects/wumbo/wumbo-infra/docs/POSTGRES_PROVISIONING.md).
+
 ### 2. Configure the prod stack
 
 Repeat the same process in `stacks/marketplace/prod`.
@@ -199,6 +209,15 @@ aws ssm start-session `
 ```
 
 Then connect locally to `127.0.0.1:15432`.
+
+The shared Postgres provisioner also expects this local tunnel to already be
+running.
+
+From [wumbo-infra](/C:/Users/adrot/Projects/wumbo/wumbo-infra), run:
+
+```bash
+bash ./scripts/postgres/provision-service-databases.sh --environment dev --region us-west-2
+```
 
 ## Cognito Hosted Login For wumbo-ui
 
@@ -329,8 +348,36 @@ After apply, `wumbo-core` can continue to run inside private subnets while
 using NAT-backed outbound HTTPS.
 
 If `wumbo-core` reads the DB password from Secrets Manager at runtime, also copy
-the `marketplace_db_kms_key_arn` output into the SAM deploy parameters so the Lambda role
-can decrypt the secret with least privilege.
+the `marketplace_postgres_kms_key_arn` output into the SAM deploy parameters so
+the Lambda role can decrypt the service-owned DB secret with least privilege.
+
+## Shared Postgres And Service Databases
+
+Marketplace now uses:
+
+- one shared Postgres instance owned by `wumbo-infra`
+- one logical Postgres database per relational service
+- one service-owned credential per service database
+
+In this model:
+
+- the shared workload metadata stays under `/<project>/<workload>/<environment>/databases/marketplace/*`
+- service-owned relational metadata lives under `/<project>/<service>/<environment>/databases/<service>/*`
+- the master user is only for platform provisioning
+- application services use only their own DB user
+
+The initial logical databases provisioned in this repo are:
+
+- `core`
+- `identity`
+
+`wumbo-core` should now be wired to the `core` database and the `core`
+credential, not the shared master credential.
+
+This shared-instance model is the current default because it keeps relational
+compute shared while load is still inconsistent. When a service needs
+independent scaling, stronger isolation, or a different availability/restore
+posture, it can move to its own DB instance later.
 
 The domain prefix must be unique within the AWS region. Start with a neutral value such as `wumbo-identity-dev-auth`, and if that is already taken, append a non-personal suffix such as a team or account alias.
 

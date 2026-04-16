@@ -76,14 +76,16 @@ variable "db_identifier" {
 }
 
 variable "db_name" {
-  description = "Initial PostgreSQL database name."
+  description = "Optional initial PostgreSQL database name to create with the shared instance."
   type        = string
+  default     = null
+  nullable    = true
 }
 
 variable "db_username" {
   description = "Master username for PostgreSQL."
   type        = string
-  default     = "wumbo"
+  default     = "postgres"
 }
 
 variable "db_port" {

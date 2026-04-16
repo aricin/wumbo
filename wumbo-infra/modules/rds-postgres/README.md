@@ -12,31 +12,36 @@ This module creates:
 - one DB parameter group
 - one KMS key and alias for database encryption and secrets
 - one Secrets Manager secret for the master password
-- SSM parameters for non-sensitive connection metadata
+- SSM parameters for shared datastore metadata
 
 It is intentionally based on standard RDS PostgreSQL, not Aurora, to keep the initial cost and complexity lower.
 
 ## Secrets Model
 
-The master password is generated with Terraform write-only arguments and stored in Secrets Manager.
+The master password is generated with Terraform write-only arguments and stored
+in Secrets Manager.
 
-Connection details that are safe to share between repos are written to SSM under:
+Connection details for the shared datastore namespace are written to SSM under:
 
-`/<project>/<environment>/databases/<database_label>/*`
+`/<resolved-parameter-prefix>/databases/<database_label>/*`
 
 That includes:
 
 - host
 - port
-- database name
-- username
-- secret ARN
+- master username
+- master secret ARN
+- KMS key ARN
+
+This module intentionally stops at the shared RDS instance boundary. It does
+not create service-owned logical databases or service users inside PostgreSQL.
 
 ## Key Inputs
 
 - `vpc_id`, `vpc_cidr`, `private_subnet_ids`: network placement
-- `db_name`, `db_username`, `db_port`: database basics
-- `database_label`: stable path/tag label such as `marketplace` or `identity`
+- `db_name`: optional initial database name to create with the instance
+- `db_username`, `db_port`: master username and port
+- `database_label`: stable path/tag label such as `marketplace`
 - `instance_class`, `engine_version`, `parameter_group_family`: compute and engine settings
 - `allocated_storage`, `max_allocated_storage`, `storage_type`, `iops`: storage settings
 - `multi_az`: availability setting
@@ -50,9 +55,9 @@ That includes:
 - `db_instance_arn`
 - `db_address`
 - `db_port`
-- `db_name`
 - `db_security_group_id`
 - `master_secret_arn`
+- `kms_key_arn`
 - `parameter_prefix`
 
 ## Example
@@ -68,8 +73,8 @@ module "database" {
   private_subnet_ids     = module.network.private_subnet_ids
   database_label         = "marketplace"
   db_identifier          = "wumbo-marketplace-dev-postgres"
-  db_name                = "wumbo"
-  db_username            = "wumbo"
+  db_name                = null
+  db_username            = "postgres"
   instance_class         = "db.t4g.micro"
   engine_version         = "16"
   parameter_group_family = "postgres16"
@@ -79,5 +84,8 @@ module "database" {
 ## Notes
 
 - This module expects Terraform `1.11+`.
+- By default it relies on the built-in PostgreSQL `postgres` database and does
+  not create an extra workload-level application database unless `db_name` is
+  explicitly set.
 - By default, if `allowed_cidr_blocks` is not provided, the database security group allows PostgreSQL from the whole VPC CIDR.
 - For a tighter setup later, you will probably want to replace CIDR-based access with security-group-based access from app compute.

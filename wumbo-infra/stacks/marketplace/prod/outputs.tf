@@ -28,39 +28,34 @@ output "nat_gateway_public_ip" {
   value       = module.network.nat_gateway_public_ip
 }
 
-output "marketplace_db_address" {
-  description = "DNS address of the marketplace PostgreSQL instance."
-  value       = module.marketplace_database.db_address
+output "marketplace_postgres_address" {
+  description = "DNS address of the shared marketplace PostgreSQL instance."
+  value       = module.marketplace_postgres.db_address
 }
 
-output "marketplace_db_port" {
-  description = "Port exposed by the marketplace PostgreSQL instance."
-  value       = module.marketplace_database.db_port
+output "marketplace_postgres_port" {
+  description = "Port exposed by the shared marketplace PostgreSQL instance."
+  value       = module.marketplace_postgres.db_port
 }
 
-output "marketplace_db_name" {
-  description = "Initial marketplace database name."
-  value       = module.marketplace_database.db_name
+output "marketplace_postgres_security_group_id" {
+  description = "Security group attached to the shared marketplace PostgreSQL instance."
+  value       = module.marketplace_postgres.db_security_group_id
 }
 
-output "marketplace_db_security_group_id" {
-  description = "Security group attached to the marketplace PostgreSQL instance."
-  value       = module.marketplace_database.db_security_group_id
+output "marketplace_postgres_master_secret_arn" {
+  description = "Secrets Manager ARN with the marketplace PostgreSQL master password."
+  value       = module.marketplace_postgres.master_secret_arn
 }
 
-output "marketplace_db_master_secret_arn" {
-  description = "Secrets Manager ARN with the marketplace DB master password."
-  value       = module.marketplace_database.master_secret_arn
-}
-
-output "marketplace_db_kms_key_arn" {
-  description = "KMS key ARN protecting the marketplace database storage and master secret."
-  value       = module.marketplace_database.kms_key_arn
+output "marketplace_postgres_kms_key_arn" {
+  description = "KMS key ARN protecting the marketplace PostgreSQL storage and master secret."
+  value       = module.marketplace_postgres.kms_key_arn
 }
 
 output "marketplace_parameter_prefix" {
   description = "Resolved SSM parameter prefix for marketplace-shared resources."
-  value       = module.marketplace_database.parameter_prefix
+  value       = module.marketplace_postgres.parameter_prefix
 }
 
 output "identity_parameter_prefix" {

@@ -8,7 +8,8 @@ locals {
     Environment = var.environment
     ManagedBy   = "Terraform"
     Layer       = "database"
-    Database    = var.database_label
+    Datastore   = var.database_label
+    Engine      = "postgres"
   })
 
   parameter_group_parameters = var.slow_query_log_min_duration_ms == null ? [] : [
@@ -181,23 +182,23 @@ resource "aws_ssm_parameter" "database_port" {
   tags  = local.common_tags
 }
 
-resource "aws_ssm_parameter" "database_name" {
-  name  = "/${local.parameter_prefix}/databases/${var.database_label}/name"
-  type  = "String"
-  value = var.db_name
-  tags  = local.common_tags
-}
-
-resource "aws_ssm_parameter" "database_username" {
-  name  = "/${local.parameter_prefix}/databases/${var.database_label}/username"
+resource "aws_ssm_parameter" "master_username" {
+  name  = "/${local.parameter_prefix}/databases/${var.database_label}/master-username"
   type  = "String"
   value = var.db_username
   tags  = local.common_tags
 }
 
-resource "aws_ssm_parameter" "database_secret_arn" {
-  name  = "/${local.parameter_prefix}/databases/${var.database_label}/secret-arn"
+resource "aws_ssm_parameter" "master_secret_arn" {
+  name  = "/${local.parameter_prefix}/databases/${var.database_label}/master-secret-arn"
   type  = "String"
   value = aws_secretsmanager_secret.master_password.arn
+  tags  = local.common_tags
+}
+
+resource "aws_ssm_parameter" "kms_key_arn" {
+  name  = "/${local.parameter_prefix}/databases/${var.database_label}/kms-key-arn"
+  type  = "String"
+  value = aws_kms_key.database.arn
   tags  = local.common_tags
 }

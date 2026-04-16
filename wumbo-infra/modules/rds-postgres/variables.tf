@@ -31,7 +31,7 @@ variable "parameter_prefix" {
 }
 
 variable "database_label" {
-  description = "Stable label used in SSM metadata paths and tags for this database workload."
+  description = "Stable label used in SSM metadata paths and tags for this shared datastore namespace."
   type        = string
   default     = "primary"
 }
@@ -44,14 +44,16 @@ variable "db_identifier" {
 }
 
 variable "db_name" {
-  description = "Initial PostgreSQL database name."
+  description = "Optional initial PostgreSQL database name to create with the instance."
   type        = string
+  default     = null
+  nullable    = true
 }
 
 variable "db_username" {
   description = "Master username for the PostgreSQL instance."
   type        = string
-  default     = "wumbo"
+  default     = "postgres"
 }
 
 variable "db_port" {

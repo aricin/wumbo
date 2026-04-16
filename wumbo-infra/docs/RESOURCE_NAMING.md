@@ -76,6 +76,8 @@ Service-owned:
 ## Current Wumbo Decisions
 
 - Marketplace PostgreSQL is workload-shared.
+- The shared marketplace datastore path is a namespace for the shared relational store, not a logical application database named `marketplace`.
+- Logical Postgres databases are service-owned and currently include `core` and `identity`.
 - The EventBridge domain bus is workload-shared.
 - The ECS cluster is workload-shared.
 - Cognito is identity-owned.
