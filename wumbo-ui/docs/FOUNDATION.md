@@ -46,7 +46,8 @@ That means:
 
 - Cognito sign-in/sign-up redirects start in `wumbo-ui`
 - OAuth callback and cookie session handling stay in `wumbo-ui`
-- Cognito PostConfirmation and internal user registration stay in `wumbo-core`
+- Cognito PostConfirmation lives in `wumbo-identity`
+- `wumbo-core` projects users asynchronously from identity events
 
 ## Component Library Conventions
 

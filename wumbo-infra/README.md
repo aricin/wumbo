@@ -15,7 +15,6 @@ See [docs/POSTGRES_PROVISIONING.md](/C:/Users/adrot/Projects/wumbo/wumbo-infra/d
 
 ```text
 modules/
-  cognito/
   ecs-ui/
   eventbridge/
   network/
@@ -65,7 +64,7 @@ stacks/
 - creates shared SNS topics for `standard` and `critical` alerts
 - can subscribe email endpoints to both topics
 - adds a small first-pass RDS alarm set
-- creates a CloudWatch dashboard that covers critical core Lambdas, RDS, EventBridge `PutEvents`, and the deployed UI service
+- creates a CloudWatch dashboard that covers the identity `PostConfirmation` Lambda, the core outbox publisher, RDS, EventBridge `PutEvents`, and the deployed UI service
 - uses workload-scoped alerting names, such as `wumbo-marketplace-dev-alerts-standard`
 
 `modules/ssm-jump-host`
@@ -74,13 +73,6 @@ stacks/
 - gives that instance outbound internet through a public subnet so SSM works without NAT or PrivateLink
 - keeps the database private while still giving you an operator access path
 - uses workload-scoped naming, such as `wumbo-marketplace-dev-jump`
-
-`modules/cognito`
-
-- creates a lean Cognito user pool and separate app clients for `wumbo-ui` and `wumbo-admin`
-- can optionally create a hosted-login domain and OAuth redirect config for `wumbo-ui`
-- writes stable identity config into SSM so `wumbo-core` and the UI repos can consume it later
-- uses service-scoped naming for identity-owned resources, such as `wumbo-identity-dev`
 
 `modules/ecs-ui`
 
@@ -120,8 +112,6 @@ Each marketplace environment stack currently creates:
 - one optional single NAT gateway for private subnet outbound HTTPS
 - one standard RDS PostgreSQL instance
 - no extra workload-level application database inside that instance
-- one Cognito user pool
-- two Cognito app clients
 - one `wumbo-ui` ECR repository
 - one workload-shared ECS cluster for marketplace app services
 - one ECS/Fargate service baseline for `wumbo-ui`
@@ -129,23 +119,24 @@ Each marketplace environment stack currently creates:
 - one custom EventBridge domain bus
 - two shared alert SNS topics
 - one shared CloudWatch operations dashboard
-- one optional hosted-login domain for `wumbo-ui`
 - one KMS key for database storage and secrets
 - one Secrets Manager secret for the master password
 - one SSM jump host EC2 instance
 - SSM parameters under `/<project>/<workload>/<environment>/databases/marketplace/*` that describe the shared marketplace datastore namespace
 - marketplace Postgres identifiers and outputs use workload-specific names such as `wumbo-marketplace-dev-postgres`
-- SSM parameters under `/<project>/identity/<environment>/cognito/*`
 - SSM parameters under `/<project>/ui/<environment>/app/*`
 - EventBridge, observability, jump-host, and the shared ECS cluster use workload-scoped marketplace naming
-- Cognito uses identity service naming
 
 ## Apply Order
 
 Start with `dev`, then mirror to `prod` once you like the shape.
 
 1. `stacks/marketplace/dev`
-2. `stacks/marketplace/prod`
+2. shared Postgres provisioner
+3. `wumbo-identity`
+4. `wumbo-core`
+5. `wumbo-ui`
+6. repeat the same sequence for `prod`
 
 ## Quick Start
 
@@ -170,8 +161,6 @@ Fill in:
 - any DB sizing changes you want
 - whether you want the single NAT gateway enabled for private Lambda egress
 - email addresses to subscribe to shared alerts if you want notifications
-- a unique `cognito_ui_domain_prefix` if you want hosted login for `wumbo-ui`
-- local callback/logout URLs for the UI if you are still smoke testing on localhost
 - `ui_github_repository` in `owner/repo` form if you want the stack to create the GitHub Actions deploy role
 - optional `ui_domain_name` plus `ui_route53_zone_id` if you want deployed HTTPS for `wumbo-ui`
 
@@ -185,6 +174,7 @@ terraform apply
 After the shared infrastructure is applied, start the DB tunnel and run the
 logical database provisioner before deploying service repos. See
 [docs/POSTGRES_PROVISIONING.md](/C:/Users/adrot/Projects/wumbo/wumbo-infra/docs/POSTGRES_PROVISIONING.md).
+Then deploy `wumbo-identity`, followed by `wumbo-core` and `wumbo-ui`.
 
 ### 2. Configure the prod stack
 
@@ -219,74 +209,43 @@ From [wumbo-infra](/C:/Users/adrot/Projects/wumbo/wumbo-infra), run:
 bash ./scripts/postgres/provision-service-databases.sh --environment dev --region us-west-2
 ```
 
-## Cognito Hosted Login For wumbo-ui
+## Identity Service Boundary
 
-The Cognito module now supports a first-pass browser login flow for `wumbo-ui`.
+`wumbo-infra` no longer owns the marketplace Cognito pool.
 
-Set these values in the stack `terraform.tfvars` when you want that enabled:
+That ownership now lives in `wumbo-identity`, which is responsible for:
 
-- `cognito_ui_domain_prefix`
-- `cognito_ui_callback_urls`
-- `cognito_ui_logout_urls`
+- the Cognito user pool
+- app clients
+- hosted login domain configuration
+- Cognito trigger Lambdas
+- `/wumbo/identity/<env>/cognito/*` SSM parameters
 
-For local smoke testing, a good dev starting point is:
+This repo still provides the shared inputs that identity consumes:
 
-```hcl
-cognito_ui_domain_prefix = "wumbo-identity-dev-auth"
-cognito_ui_callback_urls = ["http://localhost:3000/api/auth/callback"]
-cognito_ui_logout_urls   = ["http://localhost:3000"]
-```
+- VPC and private subnet IDs
+- shared EventBridge bus metadata
+- shared alert topics
+- service-owned Postgres database metadata under
+  `/wumbo/identity/<env>/databases/identity/*`
 
-For deployed browser auth, the callback and logout URLs must be `HTTPS`.
-
-If you also set:
-
-- `ui_domain_name`
-- `ui_route53_zone_id`
-
-then the stack can provision the `wumbo-ui` HTTPS endpoint and automatically
-point Cognito callback/logout URLs at:
+If `wumbo-ui` has a deployed HTTPS domain, pass that domain into the
+`wumbo-identity` deploy so its Cognito client can use:
 
 - `https://<ui_domain_name>/api/auth/callback`
 - `https://<ui_domain_name>`
 
-After apply, use these outputs to populate `wumbo-ui/.env.local`:
+For an existing environment that already has Terraform-managed Cognito
+resources, treat this as a deliberate migration step. In `dev`, the simplest
+path is usually to recreate the pool under `wumbo-identity` ownership instead
+of trying to make the ownership transfer invisible.
 
-- `cognito_ui_client_id`
-- `cognito_ui_domain_url`
-- `cognito_ui_callback_urls`
-- `cognito_ui_logout_urls`
-- `cognito_issuer_url`
-
-## Cognito PostConfirmation Trigger For Identity
-
-The Cognito module can now optionally attach a PostConfirmation trigger to the
-identity-owned user pool.
-
-Use this flow:
-
-1. deploy the service that owns the Cognito trigger code, such as `wumbo-identity`
-2. copy the trigger Lambda ARN from that service stack
-3. set `cognito_post_confirmation_lambda_arn` in the matching Terraform stack
-4. run `terraform apply`
-
-Example for `dev`:
-
-```hcl
-cognito_post_confirmation_lambda_arn = "arn:aws:lambda:us-west-2:222222222222:function:wumbo-identity-dev-post-confirmation"
-```
-
-Terraform will:
-
-- attach the Lambda as the user pool PostConfirmation trigger
-- grant Cognito permission to invoke it
-
-## Domain Event Bus For wumbo-core
+## Domain Event Bus For Services
 
 Each environment stack now creates a custom EventBridge bus named
 `${project}-${workload}-${environment}-domain-events`, such as `wumbo-marketplace-dev-domain-events`.
 
-Use these outputs when wiring `wumbo-core`:
+Use these outputs when wiring `wumbo-identity` and `wumbo-core`:
 
 - `event_bus_name`
 - `event_bus_arn`
@@ -304,6 +263,10 @@ Each environment stack now also creates:
 - `${project}-${workload}-${environment}-alerts-critical`
 - a CloudWatch dashboard named `${project}-${workload}-${environment}-operations`
 - first-pass UI alarms for ECS CPU/memory, ALB target latency, unhealthy hosts, and repeated target `5xx`
+
+The alert topics and dashboard are workload-scoped, but the UI alarms themselves
+use service-scoped names such as `wumbo-ui-dev-cpu-high` because they monitor a
+single service-owned app.
 
 Both SNS topics can subscribe the same set of email addresses through:
 

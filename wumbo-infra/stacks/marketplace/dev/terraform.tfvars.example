@@ -19,19 +19,13 @@ db_multi_az               = false
 db_deletion_protection    = false
 db_skip_final_snapshot    = true
 db_apply_immediately      = true
-cognito_allow_self_signup   = true
-cognito_deletion_protection = false
-cognito_ui_domain_prefix    = "wumbo-identity-dev-auth"
-cognito_ui_callback_urls    = ["http://localhost:3000/api/auth/callback"]
-cognito_ui_logout_urls      = ["http://localhost:3000"]
 ui_github_repository        = "replace-me/wumbo-ui"
-# Optional: once you have a real HTTPS domain for the deployed UI, set these and
-# Terraform will automatically point Cognito at https://<ui_domain_name>/...
+# Optional: once you have a real HTTPS domain for the deployed UI, set these so
+# the shared UI infrastructure can provision the HTTPS endpoint. The identity
+# service deploy now owns the Cognito hosted-login callback/logout values.
 # ui_domain_name      = "app-dev.example.com"
 # ui_route53_zone_id  = "Z1234567890"
 # ui_certificate_arn  = "arn:aws:acm:us-west-2:111111111111:certificate/..."
-# Set this after deploying wumbo-core and copying PostConfirmationFunctionArn.
-# cognito_post_confirmation_lambda_arn = "arn:aws:lambda:us-west-2:222222222222:function:wumbo-core-dev-post-confirmation"
 
 tags = {
   Owner = "replace-me"

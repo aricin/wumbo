@@ -33,6 +33,12 @@ variable "core_service_name" {
   default     = "wumbo-core"
 }
 
+variable "identity_service_name" {
+  description = "Service name prefix used for identity Lambda function naming."
+  type        = string
+  default     = "wumbo-identity"
+}
+
 variable "dashboard_name" {
   description = "Optional CloudWatch dashboard name override."
   type        = string

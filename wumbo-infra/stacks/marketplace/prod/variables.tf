@@ -222,62 +222,6 @@ variable "db_password_version" {
   default     = 1
 }
 
-variable "cognito_allow_self_signup" {
-  description = "Whether Cognito should allow self-service sign-up."
-  type        = bool
-  default     = true
-}
-
-variable "cognito_deletion_protection" {
-  description = "Whether Cognito deletion protection is enabled."
-  type        = bool
-  default     = true
-}
-
-variable "cognito_admin_group_name" {
-  description = "Default Cognito group name for internal admins."
-  type        = string
-  default     = "admin"
-}
-
-variable "cognito_customer_group_name" {
-  description = "Default Cognito group name for customer users."
-  type        = string
-  default     = "customer"
-}
-
-variable "cognito_ui_domain_prefix" {
-  description = "Optional Cognito hosted-login domain prefix for wumbo-ui."
-  type        = string
-  default     = null
-  nullable    = true
-}
-
-variable "cognito_ui_callback_urls" {
-  description = "OAuth callback URLs for wumbo-ui when no deployed HTTPS domain is wired yet."
-  type        = list(string)
-  default     = []
-}
-
-variable "cognito_ui_logout_urls" {
-  description = "OAuth logout URLs for wumbo-ui when no deployed HTTPS domain is wired yet."
-  type        = list(string)
-  default     = []
-}
-
-variable "cognito_ui_oauth_scopes" {
-  description = "OAuth scopes for wumbo-ui."
-  type        = list(string)
-  default     = ["openid", "email", "profile"]
-}
-
-variable "cognito_post_confirmation_lambda_arn" {
-  description = "Optional ARN of the wumbo-core Lambda to attach as the Cognito PostConfirmation trigger."
-  type        = string
-  default     = null
-  nullable    = true
-}
-
 variable "jump_host_instance_type" {
   description = "EC2 instance type for the SSM jump host."
   type        = string

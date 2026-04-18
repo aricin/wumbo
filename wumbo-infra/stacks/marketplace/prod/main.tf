@@ -27,26 +27,11 @@ locals {
   )
   identity_parameter_prefix = "/${var.project_name}/${local.identity_service_name}/${var.environment}"
   ui_parameter_prefix       = "/${var.project_name}/${local.ui_service_name}/${var.environment}"
-
-  ui_custom_domain_url = module.ecs_ui.custom_domain_url
-
-  cognito_ui_callback_urls = local.ui_custom_domain_url != null ? [
-    "${local.ui_custom_domain_url}/api/auth/callback",
-  ] : var.cognito_ui_callback_urls
-
-  cognito_ui_logout_urls = local.ui_custom_domain_url != null ? [
-    local.ui_custom_domain_url,
-  ] : var.cognito_ui_logout_urls
 }
 
 moved {
   from = module.ui_service
   to   = module.ecs_ui
-}
-
-moved {
-  from = module.auth
-  to   = module.identity
 }
 
 moved {
@@ -151,26 +136,6 @@ module "ecs_ui" {
   github_repository         = var.ui_github_repository
   github_oidc_provider_arn  = aws_iam_openid_connect_provider.github_actions.arn
   tags                      = var.tags
-}
-
-module "identity" {
-  source = "../../../modules/cognito"
-
-  project_name                 = var.project_name
-  environment                  = var.environment
-  service_name                 = local.identity_service_name
-  aws_region                   = var.aws_region
-  parameter_prefix             = local.identity_parameter_prefix
-  allow_self_signup            = var.cognito_allow_self_signup
-  deletion_protection          = var.cognito_deletion_protection
-  admin_group_name             = var.cognito_admin_group_name
-  customer_group_name          = var.cognito_customer_group_name
-  ui_domain_prefix             = var.cognito_ui_domain_prefix
-  ui_callback_urls             = local.cognito_ui_callback_urls
-  ui_logout_urls               = local.cognito_ui_logout_urls
-  ui_oauth_scopes              = var.cognito_ui_oauth_scopes
-  post_confirmation_lambda_arn = var.cognito_post_confirmation_lambda_arn
-  tags                         = var.tags
 }
 
 module "events" {

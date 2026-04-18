@@ -4,11 +4,12 @@ locals {
   naming_prefix    = var.workload_name != null ? "${var.project_name}-${var.workload_name}-${var.environment}" : "${var.project_name}-${var.environment}"
   parameter_prefix = trim(var.parameter_prefix != null ? var.parameter_prefix : (var.workload_name != null ? "/${var.project_name}/${var.workload_name}/${var.environment}" : "/${var.project_name}/${var.environment}"), "/")
   dashboard_name   = coalesce(var.dashboard_name, "${local.naming_prefix}-operations")
+  ui_alarm_prefix  = var.ui_service_name != null ? var.ui_service_name : "${local.naming_prefix}-ui"
 
   standard_topic_name = "${local.naming_prefix}-alerts-standard"
   critical_topic_name = "${local.naming_prefix}-alerts-critical"
 
-  post_confirmation_function_name = "${var.core_service_name}-${var.environment}-post-confirmation"
+  post_confirmation_function_name = "${var.identity_service_name}-${var.environment}-post-confirmation"
   publish_outbox_function_name    = "${var.core_service_name}-${var.environment}-publish-outbox"
   ui_enabled                      = var.ui_enabled
 
@@ -215,7 +216,7 @@ resource "aws_cloudwatch_metric_alarm" "database_free_storage_low" {
 resource "aws_cloudwatch_metric_alarm" "ui_cpu_high" {
   count = local.ui_enabled ? 1 : 0
 
-  alarm_name          = "${local.naming_prefix}-ui-cpu-high"
+  alarm_name          = "${local.ui_alarm_prefix}-cpu-high"
   alarm_description   = "The UI ECS service has sustained high CPU usage."
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 3
@@ -237,7 +238,7 @@ resource "aws_cloudwatch_metric_alarm" "ui_cpu_high" {
 resource "aws_cloudwatch_metric_alarm" "ui_memory_high" {
   count = local.ui_enabled ? 1 : 0
 
-  alarm_name          = "${local.naming_prefix}-ui-memory-high"
+  alarm_name          = "${local.ui_alarm_prefix}-memory-high"
   alarm_description   = "The UI ECS service has sustained high memory usage."
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 3
@@ -259,7 +260,7 @@ resource "aws_cloudwatch_metric_alarm" "ui_memory_high" {
 resource "aws_cloudwatch_metric_alarm" "ui_target_response_time_high" {
   count = local.ui_enabled ? 1 : 0
 
-  alarm_name          = "${local.naming_prefix}-ui-target-response-time-high"
+  alarm_name          = "${local.ui_alarm_prefix}-target-response-time-high"
   alarm_description   = "The UI load balancer target response time is elevated."
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 3
@@ -281,7 +282,7 @@ resource "aws_cloudwatch_metric_alarm" "ui_target_response_time_high" {
 resource "aws_cloudwatch_metric_alarm" "ui_unhealthy_hosts" {
   count = local.ui_enabled ? 1 : 0
 
-  alarm_name          = "${local.naming_prefix}-ui-unhealthy-hosts"
+  alarm_name          = "${local.ui_alarm_prefix}-unhealthy-hosts"
   alarm_description   = "One or more UI targets are unhealthy."
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 2
@@ -303,7 +304,7 @@ resource "aws_cloudwatch_metric_alarm" "ui_unhealthy_hosts" {
 resource "aws_cloudwatch_metric_alarm" "ui_target_5xx_high" {
   count = local.ui_enabled ? 1 : 0
 
-  alarm_name          = "${local.naming_prefix}-ui-target-5xx-high"
+  alarm_name          = "${local.ui_alarm_prefix}-target-5xx-high"
   alarm_description   = "The UI app is returning repeated 5xx responses."
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 1
@@ -334,7 +335,7 @@ resource "aws_cloudwatch_dashboard" "operations" {
         width  = 12
         height = 6
         properties = {
-          title   = "Core Lambda Errors"
+          title   = "Identity And Core Lambda Errors"
           region  = data.aws_region.current.region
           stat    = "Sum"
           period  = 300
@@ -353,7 +354,7 @@ resource "aws_cloudwatch_dashboard" "operations" {
         width  = 12
         height = 6
         properties = {
-          title   = "Core Lambda Duration"
+          title   = "Identity And Core Lambda Duration"
           region  = data.aws_region.current.region
           stat    = "Average"
           period  = 300

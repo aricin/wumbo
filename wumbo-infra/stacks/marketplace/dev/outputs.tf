@@ -58,59 +58,9 @@ output "marketplace_parameter_prefix" {
   value       = module.marketplace_postgres.parameter_prefix
 }
 
-output "identity_parameter_prefix" {
-  description = "Resolved SSM parameter prefix for identity-owned resources."
-  value       = module.identity.parameter_prefix
-}
-
 output "ui_parameter_prefix" {
   description = "Resolved SSM parameter prefix for ui deploy metadata."
   value       = module.ecs_ui.parameter_prefix
-}
-
-output "cognito_user_pool_id" {
-  description = "Cognito user pool ID for this environment."
-  value       = module.identity.user_pool_id
-}
-
-output "cognito_issuer_url" {
-  description = "JWT issuer URL for this environment's Cognito user pool."
-  value       = module.identity.issuer_url
-}
-
-output "cognito_ui_client_id" {
-  description = "App client ID intended for ui."
-  value       = module.identity.ui_client_id
-}
-
-output "cognito_ui_domain_url" {
-  description = "Hosted-login domain URL for ui, if configured."
-  value       = module.identity.ui_domain_url
-}
-
-output "cognito_ui_callback_urls" {
-  description = "OAuth callback URLs configured for ui."
-  value       = module.identity.ui_callback_urls
-}
-
-output "cognito_ui_logout_urls" {
-  description = "OAuth logout URLs configured for ui."
-  value       = module.identity.ui_logout_urls
-}
-
-output "cognito_admin_client_id" {
-  description = "App client ID intended for admin."
-  value       = module.identity.admin_client_id
-}
-
-output "cognito_jwt_audiences" {
-  description = "JWT audiences that wumbo-core should accept."
-  value       = module.identity.jwt_audiences
-}
-
-output "cognito_post_confirmation_lambda_arn" {
-  description = "Configured Cognito PostConfirmation Lambda ARN, if any."
-  value       = module.identity.post_confirmation_lambda_arn
 }
 
 output "event_bus_name" {
