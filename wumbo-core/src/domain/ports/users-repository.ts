@@ -1,6 +1,7 @@
 import type { User } from "../entities/user";
 
 export interface UserIdentity {
+  identityUserId: string;
   subject: string;
   email?: string;
 }

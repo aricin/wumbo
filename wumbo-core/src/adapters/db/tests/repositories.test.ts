@@ -39,18 +39,22 @@ dbTest("UsersRepository creates and then updates the same user by Cognito subjec
   await withRollbackTransaction(async (db) => {
     const usersRepository = createUsersRepository(db);
     const subject = createTestKey("subject");
+    const identityUserId = createTestKey("identity-user");
 
     const created = await usersRepository.upsertFromIdentity({
+      identityUserId,
       subject,
       email: "first@example.com",
     });
 
     const updated = await usersRepository.upsertFromIdentity({
+      identityUserId,
       subject,
       email: "second@example.com",
     });
 
     assert.equal(created.created, true);
+    assert.equal(created.user.identityUserId, identityUserId);
     assert.equal(created.user.cognitoSubject, subject);
     assert.equal(updated.created, false);
     assert.equal(updated.emailUpdated, true);
@@ -72,6 +76,7 @@ dbTest("PublicProfilesRepository upserts and reads a public profile", async () =
     const subject = createTestKey("subject");
     const handle = createTestKey("handle").replace(/-/g, "_");
     const user = await usersRepository.upsertFromIdentity({
+      identityUserId: createTestKey("identity-user"),
       subject,
       email: "profile@example.com",
     });
@@ -107,10 +112,12 @@ dbTest("PropertiesRepository creates, updates, and translates unique slug confli
     const usersRepository = createUsersRepository(db);
     const propertiesRepository = createPropertiesRepository(db);
     const owner = await usersRepository.upsertFromIdentity({
+      identityUserId: createTestKey("identity-user"),
       subject: createTestKey("subject"),
       email: "owner@example.com",
     });
     const duplicateOwner = await usersRepository.upsertFromIdentity({
+      identityUserId: createTestKey("identity-user"),
       subject: createTestKey("subject"),
       email: "other-owner@example.com",
     });
@@ -245,6 +252,7 @@ dbTest("cleanup helper removes committed rows created by DB tests", async () => 
   const slug = createTestKey("cleanup-property");
   const propertyId = createTestKey("cleanup-property-id");
   const user = await usersRepository.upsertFromIdentity({
+    identityUserId: createTestKey("identity-user"),
     subject,
     email: "cleanup@example.com",
   });

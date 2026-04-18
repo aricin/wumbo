@@ -21,6 +21,33 @@ The goal is to keep:
 
 For this TypeScript codebase, we keep the top-level code under `src/` instead of `app/`, but the meaning is the same.
 
+This is an intentional choice for `wumbo-core`, not a blanket rule for every Wumbo service.
+
+### Why We Use It In `wumbo-core`
+
+`wumbo-core` owns the marketplace domain and has business rules worth isolating:
+
+- ownership and authorization policies
+- state-changing workflows that must stay consistent across entrypoints
+- async consumers that still need to reuse the same rules as HTTP handlers
+- transactional writes that also create outbox events
+
+The main benefit is not architectural purity. The benefit is that we can keep the
+domain logic testable and reusable without pulling API Gateway, Lambda, Cognito,
+Postgres, or EventBridge into every test.
+
+### Why We Do Not Treat It As A Default
+
+Hexagonal architecture adds real cost:
+
+- more interfaces and adapter plumbing
+- more indirection when tracing a request
+- more ceremony for straightforward CRUD or integration-only workflows
+
+We only want that cost when the service has enough domain complexity to earn it.
+For a simpler service that mainly translates external inputs into persistence or
+downstream events, a flatter application structure is usually easier to maintain.
+
 ## Target Structure
 
 ```text
@@ -38,7 +65,7 @@ src/
       auth/
       handlers/
       dto/
-    cognito/
+    events/
     jobs/
 
   domain/
@@ -71,12 +98,12 @@ src/
   - maintenance jobs
   - future queue consumers if they stay in this repo
 
-`src/entrypoints/cognito`
+`src/entrypoints/events`
 
-- Cognito-triggered handlers
+- async consumer handlers
 - examples:
-  - post-confirmation registration
-  - future custom-message or custom-sender hooks if the product needs them
+  - identity user registration queue consumer
+  - future SQS/EventBridge-driven integration handlers
 
 `src/domain`
 
@@ -140,6 +167,7 @@ Use this split:
 Recommended linkage:
 
 - `users.id`: internal UUID
+- `users.identity_user_id`: canonical cross-service identity key
 - `users.cognito_subject`: unique mapping to Cognito `sub`
 
 This keeps the application from treating Cognito as the domain database.
@@ -149,9 +177,10 @@ This keeps the application from treating Cognito as the domain database.
 The current intended registration flow is:
 
 1. Cognito handles signup, password, and confirmation email delivery
-2. Cognito `PostConfirmation` invokes a Lambda entrypoint in `wumbo-core`
-3. `registerUserFromIdentity` creates or updates the internal `users` row
-4. first-time registration writes `core.user.registered.v1` to the outbox
+2. `wumbo-identity` `PostConfirmation` creates or updates the canonical identity user
+3. `wumbo-identity` publishes `identity.user.registered.v1`
+4. an async consumer in `wumbo-core` runs `registerUserFromIdentity`
+5. first-time registration writes `user-registered.v1` to the outbox
 
 This keeps identity lifecycle concerns in Cognito while still giving the domain
 its own application user record.
@@ -176,6 +205,7 @@ Purpose:
 Suggested columns:
 
 - `id`
+- `identity_user_id`
 - `cognito_subject`
 - `email`
 - `status`
@@ -342,6 +372,11 @@ Examples:
 
 Repository implementations then live in `src/adapters/db/repositories`.
 
+This is another place where the tradeoff matters. In `wumbo-core`, repository and
+outbox ports help because the use-cases and policies are the durable part of the
+system. In a thinner service, adding ports for every database call can create more
+complexity than value.
+
 ## Testing Strategy
 
 Domain tests should focus on:
@@ -361,7 +396,7 @@ Entrypoint tests should focus on:
 
 - request validation
 - auth-context parsing
-- Cognito trigger translation
+- async event translation
 - use-case wiring
 - permission enforcement
 
@@ -410,7 +445,7 @@ The reference implementation now follows this structure:
 
 - Phase 4 is now started:
   - user registration now has its own `registerUserFromIdentity` use-case
-  - a Cognito `PostConfirmation` entrypoint exists in `src/entrypoints/cognito`
+  - an async identity registration consumer exists in `src/entrypoints/events`
   - write flows no longer lazily create users during normal request handling
 
 ## Immediate Next Steps

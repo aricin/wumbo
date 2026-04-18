@@ -12,13 +12,18 @@ import {
 import { createUser } from "./helpers/fixtures";
 
 test("registerUserFromIdentity creates a user and enqueues a registration event", async () => {
-  const capturedIdentities: Array<{ subject: string; email?: string }> = [];
+  const capturedIdentities: Array<{
+    identityUserId: string;
+    subject: string;
+    email?: string;
+  }> = [];
   const eventOutbox = createEventOutboxFake();
   const unitOfWork = createUnitOfWorkFake(
     createWriteContextFake({
       users: createUsersRepositoryFake({
         async upsertFromIdentity(identity) {
           capturedIdentities.push({
+            identityUserId: identity.identityUserId,
             subject: identity.subject,
             email: identity.email,
           });
@@ -26,6 +31,7 @@ test("registerUserFromIdentity creates a user and enqueues a registration event"
           return {
             user: createUser({
               id: "user-123",
+              identityUserId: identity.identityUserId,
               cognitoSubject: identity.subject,
               email: identity.email,
             }),
@@ -42,12 +48,14 @@ test("registerUserFromIdentity creates a user and enqueues a registration event"
     unitOfWork,
   });
   const result = await registerUserFromIdentity({
+    identityUserId: " identity-user-123 ",
     subject: " subject-123 ",
     email: " USER@EXAMPLE.COM ",
   });
 
   assert.deepEqual(capturedIdentities, [
     {
+      identityUserId: "identity-user-123",
       subject: "subject-123",
       email: "user@example.com",
     },
@@ -58,6 +66,7 @@ test("registerUserFromIdentity creates a user and enqueues a registration event"
   assert.equal(eventOutbox.enqueuedEvents[0]?.eventName, "user-registered.v1");
   assert.deepEqual(eventOutbox.enqueuedEvents[0]?.payload, {
     userId: "user-123",
+    identityUserId: "identity-user-123",
     cognitoSubject: "subject-123",
     email: "user@example.com",
     status: "active",
@@ -73,6 +82,7 @@ test("registerUserFromIdentity does not enqueue a registration event for existin
           return {
             user: createUser({
               id: "user-123",
+              identityUserId: identity.identityUserId,
               cognitoSubject: identity.subject,
               email: identity.email,
             }),
@@ -89,6 +99,7 @@ test("registerUserFromIdentity does not enqueue a registration event for existin
     unitOfWork,
   });
   const result = await registerUserFromIdentity({
+    identityUserId: "identity-user-123",
     subject: "subject-123",
     email: "updated@example.com",
   });
@@ -114,11 +125,41 @@ test("registerUserFromIdentity rejects blank subjects before opening a unit of w
   await assert.rejects(
     () =>
       registerUserFromIdentity({
+        identityUserId: "identity-user-123",
         subject: "   ",
       }),
     (error: unknown) => {
       assert.ok(error instanceof ValidationError);
       assert.equal(error.message, "subject is required.");
+      return true;
+    },
+  );
+
+  assert.equal(runCalls, 0);
+});
+
+test("registerUserFromIdentity rejects blank identity user ids before opening a unit of work", async () => {
+  let runCalls = 0;
+  const unitOfWork = {
+    async run() {
+      runCalls += 1;
+      throw new Error("UnitOfWork should not run when identityUserId is blank.");
+    },
+  };
+
+  const registerUserFromIdentity = createRegisterUserFromIdentityUseCase({
+    unitOfWork,
+  });
+
+  await assert.rejects(
+    () =>
+      registerUserFromIdentity({
+        identityUserId: "   ",
+        subject: "subject-123",
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof ValidationError);
+      assert.equal(error.message, "identityUserId is required.");
       return true;
     },
   );

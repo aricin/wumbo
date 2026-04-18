@@ -13,7 +13,7 @@ It owns:
 It does not own:
 
 - AWS account/bootstrap infrastructure
-- standalone async consumers
+- identity-provider lifecycle hooks
 - UI applications
 - Stripe-specific infrastructure
 
@@ -27,12 +27,43 @@ See also:
 
 This repo follows a hexagonal architecture shape:
 
-- `entrypoints`: inbound adapters such as API Gateway handlers, Cognito triggers, and scheduled jobs
+- `entrypoints`: inbound adapters such as API Gateway handlers, queue consumers, and scheduled jobs
 - `domain`: business logic, entities, use-cases, policies, and ports
 - `adapters`: implementations for the database and external systems
 - `shared`: lightweight config and HTTP utilities used across the app
 
-That split matters because it lets us test business rules without needing Lambda, Cognito, or Postgres running.
+That split matters because `wumbo-core` has real domain complexity:
+
+- ownership and authorization rules
+- multiple entrypoints that need to share the same business logic
+- a need for fast tests that do not require Lambda, Cognito, or Postgres running
+
+This pattern is a conscious tradeoff, not a default rule for every service in the platform.
+
+### Why This Fits `wumbo-core`
+
+We use ports and adapters here because `wumbo-core` is the marketplace domain service.
+It owns the rules that actually need protecting and reuse:
+
+- public API behavior
+- future admin/API clients
+- async consumers that still need to enforce domain rules
+- transactional writes plus outbox publication
+
+Keeping those rules in `domain/` lets different entrypoints call the same use-cases and
+policy functions without re-implementing them at the edges.
+
+### When Not To Reach For This Pattern
+
+Ports/adapters and DDD-style layering add cost:
+
+- more files and interfaces
+- more indirection when reading the code
+- more maintenance when the workflow is simple
+
+We do not treat hexagonal architecture as a one-size-fits-all standard. For a thin service
+that mostly translates one external event into one database write or one downstream call, a
+flatter application structure is often the better choice.
 
 ### Auth vs Authorization
 
@@ -70,9 +101,10 @@ The link is `users.cognito_subject -> Cognito sub`.
 The normal user-registration path is:
 
 1. Cognito signup and confirmation
-2. Cognito `PostConfirmation` trigger
-3. `registerUserFromIdentity` in `wumbo-core`
-4. internal `users` row creation plus `user-registered.v1`
+2. `wumbo-identity` `PostConfirmation` trigger
+3. `identity.user.registered.v1` on the shared domain bus
+4. `registerUserFromIdentity` in `wumbo-core`
+5. internal `users` row creation plus `user-registered.v1`
 
 ### Public vs Private Profile Data
 
@@ -146,7 +178,7 @@ src/
       auth/
       handlers/
       dto/
-    cognito/
+    events/
     jobs/
   shared/
     config/
@@ -156,7 +188,7 @@ src/
 High-level responsibilities:
 
 - `src/entrypoints/api`: Lambda handlers, request translation, auth-context translation
-- `src/entrypoints/cognito`: Cognito-triggered handlers such as post-confirmation user registration
+- `src/entrypoints/events`: async consumers such as the identity registration queue handler
 - `src/entrypoints/jobs`: scheduled/background entrypoints
 - `src/domain`: business rules and use-case orchestration
 - `src/adapters/db`: Drizzle schema, migrations, repositories, and the concrete `UnitOfWork`
@@ -177,7 +209,7 @@ Current user lifecycle path:
 - Cognito owns signup, password, and confirmation emails
 - `wumbo-core` owns the internal app user record
 - `registerUserFromIdentity` creates or updates the internal user from an identity event
-- the PostConfirmation Lambda is defined in SAM and can be attached in `wumbo-infra`
+- `wumbo-core` now consumes `identity.user.registered.v1` asynchronously instead of being invoked directly by Cognito
 
 ## Getting Set Up
 
@@ -319,7 +351,7 @@ This stack now also enables:
 
 - JSON Lambda logs through `LoggingConfig`
 - a shared Lambda service log group with `30` day retention
-- first-pass CloudWatch alarms for `PostConfirmation` and `PublishOutbox`
+- first-pass CloudWatch alarms for the identity-registration consumer and `PublishOutbox`
 
 Those alarms assume the shared infra topics exist in the same account and
 region and are passed into the SAM deploy as topic ARNs. In the current
@@ -347,7 +379,7 @@ Key entry files:
 The supporting docs are current with the codebase:
 
 - [docs/ARCHITECTURE.md](C:\Users\adrot\Projects\wumbo\wumbo-core\docs\ARCHITECTURE.md) reflects the current hexagonal layout and the `users / profiles / properties` model
-- [docs/TESTING.md](C:\Users\adrot\Projects\wumbo\wumbo-core\docs\TESTING.md) reflects the current testing layers, permission matrix, and Cognito trigger coverage
+- [docs/TESTING.md](C:\Users\adrot\Projects\wumbo\wumbo-core\docs\TESTING.md) reflects the current testing layers, permission matrix, and async consumer coverage
 
 The next big gap is implementation, not documentation:
 

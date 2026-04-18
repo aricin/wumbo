@@ -59,7 +59,7 @@ Notes:
 Location:
 
 - `src/entrypoints/api/tests`
-- `src/entrypoints/cognito/tests`
+- `src/entrypoints/events/tests`
 
 What to test:
 
@@ -79,7 +79,7 @@ Good first targets:
 - error-to-response mapping
 - one public read handler
 - one authenticated write handler
-- Cognito post-confirmation registration handler
+- identity registration queue consumer
 
 ### Job Tests
 
@@ -93,16 +93,16 @@ What to test:
 - outbox publisher batching
 - failure and retry handling
 
-### Cognito Trigger Tests
+### Async Consumer Tests
 
 Location:
 
-- `src/entrypoints/cognito/tests`
+- `src/entrypoints/events/tests`
 
 What to test:
 
-- trigger event parsing
-- required Cognito identity attributes
+- queue message parsing
+- required identity event attributes
 - use-case wiring
 - idempotent registration behavior through the domain tests
 
@@ -176,6 +176,6 @@ Phase 2:
 Phase 3:
 
 - API handler tests
-- Cognito trigger handler tests
+- async consumer handler tests
 - outbox publisher tests
 - deployed cloud smoke tests

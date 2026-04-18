@@ -43,6 +43,7 @@ dbTest("dbUnitOfWork commits all writes when the work succeeds", async () => {
   try {
     await dbUnitOfWork.run(async (context) => {
       const user = await context.users.upsertFromIdentity({
+        identityUserId: createTestKey("identity-user"),
         subject,
         email: "uow@example.com",
       });
@@ -105,6 +106,7 @@ dbTest("dbUnitOfWork rolls back all writes when the work throws", async () => {
     () =>
       dbUnitOfWork.run(async (context) => {
         const user = await context.users.upsertFromIdentity({
+          identityUserId: createTestKey("identity-user"),
           subject,
           email: "rollback@example.com",
         });

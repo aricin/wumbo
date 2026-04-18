@@ -6,6 +6,7 @@ export const users = pgTable(
   "users",
   {
     id: uuid("id").primaryKey(),
+    identityUserId: uuid("identity_user_id"),
     cognitoSubject: text("cognito_subject").notNull(),
     email: text("email"),
     status: text("status").$type<UserStatus>().notNull().default("active"),
@@ -21,6 +22,7 @@ export const users = pgTable(
       .notNull(),
   },
   (table) => ({
+    identityUserIdUnique: uniqueIndex("users_identity_user_id_idx").on(table.identityUserId),
     cognitoSubjectUnique: uniqueIndex("users_cognito_subject_idx").on(table.cognitoSubject),
   }),
 );

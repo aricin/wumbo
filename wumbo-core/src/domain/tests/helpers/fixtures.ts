@@ -26,6 +26,7 @@ export function createDomainActor(overrides: Partial<DomainActor> = {}): DomainA
 export function createUser(overrides: Partial<User> = {}): User {
   return {
     id: "user-1",
+    identityUserId: "identity-user-1",
     cognitoSubject: "user-subject-1",
     email: "user@example.com",
     status: "active",

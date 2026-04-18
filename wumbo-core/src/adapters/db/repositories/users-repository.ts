@@ -21,16 +21,31 @@ export function createUsersRepository(db: Database): UsersRepository {
     },
 
     async upsertFromIdentity(identity: UserIdentity): Promise<UpsertUserFromIdentityResult> {
-      const existing = await db.query.users.findFirst({
+      const existingByIdentityUserId = await db.query.users.findFirst({
+        where: eq(users.identityUserId, identity.identityUserId),
+      });
+      const existingBySubject = await db.query.users.findFirst({
         where: eq(users.cognitoSubject, identity.subject),
       });
+      const existing =
+        existingByIdentityUserId && existingBySubject
+          ? ensureMatchingUser(existingByIdentityUserId, existingBySubject, identity)
+          : existingByIdentityUserId ?? existingBySubject;
 
       if (existing) {
-        if (identity.email && identity.email !== existing.email) {
+        const nextEmail = identity.email ?? existing.email ?? null;
+        const emailUpdated = nextEmail !== existing.email;
+        const identityUpdated =
+          existing.identityUserId !== identity.identityUserId ||
+          existing.cognitoSubject !== identity.subject;
+
+        if (emailUpdated || identityUpdated) {
           const [updated] = await db
             .update(users)
             .set({
-              email: identity.email,
+              identityUserId: identity.identityUserId,
+              cognitoSubject: identity.subject,
+              email: nextEmail,
               updatedAt: new Date(),
             })
             .where(eq(users.id, existing.id))
@@ -39,7 +54,7 @@ export function createUsersRepository(db: Database): UsersRepository {
           return {
             user: mapUser(updated ?? existing),
             created: false,
-            emailUpdated: true,
+            emailUpdated,
           };
         }
 
@@ -54,6 +69,7 @@ export function createUsersRepository(db: Database): UsersRepository {
         .insert(users)
         .values({
           id: randomUUID(),
+          identityUserId: identity.identityUserId,
           cognitoSubject: identity.subject,
           email: identity.email,
           status: "active",
@@ -76,10 +92,25 @@ export function createUsersRepository(db: Database): UsersRepository {
 function mapUser(row: typeof users.$inferSelect): User {
   return {
     id: row.id,
+    identityUserId: row.identityUserId ?? undefined,
     cognitoSubject: row.cognitoSubject,
     email: row.email ?? undefined,
     status: row.status,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+function ensureMatchingUser(
+  existingByIdentityUserId: typeof users.$inferSelect,
+  existingBySubject: typeof users.$inferSelect,
+  identity: UserIdentity,
+): typeof users.$inferSelect {
+  if (existingByIdentityUserId.id !== existingBySubject.id) {
+    throw new Error(
+      `Conflicting core users found for identityUserId ${identity.identityUserId} and subject ${identity.subject}.`,
+    );
+  }
+
+  return existingByIdentityUserId;
 }

@@ -5,6 +5,7 @@ import {
 
 export interface UserRegisteredPayload extends Record<string, unknown> {
   userId: string;
+  identityUserId?: string;
   cognitoSubject: string;
   email?: string;
   status: string;

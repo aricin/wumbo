@@ -5,7 +5,7 @@ This folder contains the primary adapters for `wumbo-core`.
 These are the ways the outside world enters the application, such as:
 
 - HTTP/API requests
-- Cognito trigger events
+- async queue or bus events
 - scheduled jobs
 
 Entrypoints should translate external input into domain use-case calls.

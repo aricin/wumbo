@@ -180,6 +180,65 @@ Resources:
                     - events:PutEvents
                   Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/${EventBusName}"
                 - !Ref AWS::NoValue
+              - Sid: ConsumeIdentityUserRegisteredQueue
+                Effect: Allow
+                Action:
+                  - sqs:ChangeMessageVisibility
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ReceiveMessage
+                Resource: !GetAtt IdentityUserRegisteredQueue.Arn
+
+  IdentityUserRegisteredDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered-dlq"
+      MessageRetentionPeriod: 1209600
+
+  IdentityUserRegisteredQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered"
+      VisibilityTimeout: 90
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt IdentityUserRegisteredDeadLetterQueue.Arn
+        maxReceiveCount: 5
+
+  IdentityUserRegisteredQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Condition: UseEventBus
+    Properties:
+      Queues:
+        - !Ref IdentityUserRegisteredQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowEventBridgeToSendIdentityUserRegisteredMessages
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt IdentityUserRegisteredQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !GetAtt IdentityUserRegisteredRule.Arn
+
+  IdentityUserRegisteredRule:
+    Type: AWS::Events::Rule
+    Condition: UseEventBus
+    Properties:
+      Name: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered"
+      Description: Routes identity user registration events into the core consumer queue.
+      EventBusName: !Ref EventBusName
+      EventPattern:
+        source:
+          - wumbo.identity
+        detail-type:
+          - identity.user.registered.v1
+      Targets:
+        - Arn: !GetAtt IdentityUserRegisteredQueue.Arn
+          Id: IdentityUserRegisteredQueueTarget
 
   CoreHttpApi:
     Type: AWS::Serverless::HttpApi
@@ -408,6 +467,30 @@ Resources:
         Sourcemap: true
         Target: es2022
 
+  IdentityUserRegisteredConsumerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered"
+      Handler: src/entrypoints/events/identity-user-registered.handler
+      Role: !GetAtt CoreFunctionRole.Arn
+      Events:
+        IdentityUserRegisteredQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt IdentityUserRegisteredQueue.Arn
+            BatchSize: 10
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/entrypoints/events/identity-user-registered.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2022
+
   PublishOutboxFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -423,6 +506,7 @@ Resources:
         PublishSchedule:
           Type: ScheduleV2
           Properties:
+            Name: !Sub "${ServiceName}-${EnvironmentName}-publish-outbox-schedule"
             ScheduleExpression: !Ref PublisherScheduleExpression
             State: !Ref PublisherScheduleState
             Description: Publishes pending outbox rows to EventBridge.
@@ -436,38 +520,22 @@ Resources:
         Sourcemap: true
         Target: es2022
 
-  PostConfirmationFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-post-confirmation"
-      Handler: src/entrypoints/cognito/post-confirmation.handler
-      Role: !GetAtt CoreFunctionRole.Arn
-    Metadata:
-      BuildMethod: esbuild
-      BuildProperties:
-        EntryPoints:
-          - src/entrypoints/cognito/post-confirmation.ts
-        Format: cjs
-        Minify: false
-        Sourcemap: true
-        Target: es2022
-
   CoreServiceLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/${ProjectName}/${EnvironmentName}/${ServiceName}"
       RetentionInDays: !Ref LogRetentionInDays
 
-  PostConfirmationErrorsAlarm:
+  IdentityUserRegisteredErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-post-confirmation-errors"
-      AlarmDescription: Cognito PostConfirmation is failing.
+      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered-errors"
+      AlarmDescription: The identity user registration consumer is failing.
       Namespace: AWS/Lambda
       MetricName: Errors
       Dimensions:
         - Name: FunctionName
-          Value: !Sub "${ServiceName}-${EnvironmentName}-post-confirmation"
+          Value: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered"
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
@@ -478,25 +546,45 @@ Resources:
       AlarmActions:
         - !If [UseCriticalAlertsTopic, !Ref CriticalAlertsTopicArn, !Ref AWS::NoValue]
 
-  PostConfirmationDurationAlarm:
+  IdentityUserRegisteredDurationAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-post-confirmation-duration-high"
-      AlarmDescription: Cognito PostConfirmation is approaching the upstream timeout budget.
+      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered-duration-high"
+      AlarmDescription: The identity user registration consumer is taking longer than expected.
       Namespace: AWS/Lambda
       MetricName: Duration
       Dimensions:
         - Name: FunctionName
-          Value: !Sub "${ServiceName}-${EnvironmentName}-post-confirmation"
+          Value: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered"
       Statistic: Average
       Period: 300
       EvaluationPeriods: 1
       DatapointsToAlarm: 1
-      Threshold: 4000
+      Threshold: 10000
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
         - !If [UseStandardAlertsTopic, !Ref StandardAlertsTopicArn, !Ref AWS::NoValue]
+
+  IdentityUserRegisteredDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered-dlq-visible"
+      AlarmDescription: Identity registration messages are piling up in the DLQ.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered-dlq"
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [UseCriticalAlertsTopic, !Ref CriticalAlertsTopicArn, !Ref AWS::NoValue]
 
   PublishOutboxErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -548,6 +636,3 @@ Outputs:
   CoreSecurityGroupId:
     Description: Security group used by the core Lambdas.
     Value: !Ref CoreSecurityGroup
-  PostConfirmationFunctionArn:
-    Description: ARN of the Cognito PostConfirmation handler.
-    Value: !GetAtt PostConfirmationFunction.Arn

@@ -32,6 +32,7 @@ export function createUsersRepositoryFake(overrides: Partial<UsersRepository> = 
       return {
         user: {
           id: "user-1",
+          identityUserId: identity.identityUserId,
           cognitoSubject: identity.subject,
           email: identity.email,
           status: "active",
