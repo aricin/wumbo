@@ -39,11 +39,11 @@ Parameters:
     Type: String
     Default: ""
   CognitoIssuer:
-    Type: String
-    Default: ""
+    Type: AWS::SSM::Parameter::Value<String>
+    Description: SSM parameter path for the trusted Cognito issuer URL.
   CognitoAudiences:
-    Type: CommaDelimitedList
-    Default: ""
+    Type: AWS::SSM::Parameter::Value<List<String>>
+    Description: SSM parameter path for the trusted Cognito audience list.
   StandardAlertsTopicArn:
     Type: String
     Default: ""
