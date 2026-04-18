@@ -1,0 +1,36 @@
+version = 0.1
+
+[dev.deploy.parameters]
+stack_name = "wumbo-identity-dev"
+resolve_s3 = true
+s3_prefix = "wumbo-identity-dev"
+region = "us-west-2"
+confirm_changeset = true
+capabilities = "CAPABILITY_NAMED_IAM"
+parameter_overrides = """\
+ServiceName="wumbo-identity" \
+EnvironmentName="dev" \
+VpcId="vpc-062ae6a609870fe32" \
+VpcCidr="10.20.0.0/16" \
+PrivateSubnetIds="subnet-0be082725b4b8d5c7,subnet-01bc92cc78884c77f" \
+DatabaseHost="wumbo-marketplace-dev-postgres.c5844q4ui74l.us-west-2.rds.amazonaws.com" \
+DatabaseName="identity" \
+DatabaseUsername="identity" \
+DatabaseSecretArn="arn:aws:secretsmanager:us-west-2:498309140969:secret:wumbo-identity-dev-postgres/password-tq1MmW" \
+DatabaseSecretKmsKeyArn="arn:aws:kms:us-west-2:498309140969:key/6d268ac7-1d64-47d2-915d-ac7ad2e4b574" \
+EventBusName="wumbo-marketplace-dev-domain-events" \
+PublisherScheduleExpression="rate(1 minute)" \
+PublisherScheduleState="ENABLED" \
+PublisherBatchSize="10" \
+CognitoAllowSelfSignup="true" \
+CognitoDeletionProtection="INACTIVE" \
+CognitoUiDomainPrefix="wumbo-identity-dev-auth-20260418" \
+CognitoUiCallbackUrls="http://localhost:3000/api/auth/callback" \
+CognitoUiLogoutUrls="http://localhost:3000" \
+"""
+
+[dev.global.parameters]
+region = "us-west-2"
+
+[prod.global.parameters]
+region = "us-west-2"

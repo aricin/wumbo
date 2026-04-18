@@ -1,0 +1,544 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Identity service for wumbo.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: wumbo
+  ServiceName:
+    Type: String
+    Default: wumbo-identity
+  EnvironmentName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  VpcCidr:
+    Type: String
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  DatabaseHost:
+    Type: String
+  DatabasePort:
+    Type: Number
+    Default: 5432
+  DatabaseName:
+    Type: String
+  DatabaseUsername:
+    Type: String
+  DatabaseSecretArn:
+    Type: String
+  DatabaseSecretKmsKeyArn:
+    Type: String
+    Default: ""
+  EventBusName:
+    Type: String
+    Default: ""
+  StandardAlertsTopicArn:
+    Type: String
+    Default: ""
+  CriticalAlertsTopicArn:
+    Type: String
+    Default: ""
+  PublisherScheduleExpression:
+    Type: String
+    Default: rate(1 minute)
+  PublisherScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues:
+      - DISABLED
+      - ENABLED
+  PublisherBatchSize:
+    Type: Number
+    Default: 10
+  PublisherClaimTimeoutSeconds:
+    Type: Number
+    Default: 120
+  LogRetentionInDays:
+    Type: Number
+    Default: 30
+  CognitoAllowSelfSignup:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+  CognitoDeletionProtection:
+    Type: String
+    Default: INACTIVE
+    AllowedValues:
+      - ACTIVE
+      - INACTIVE
+  CognitoAdminGroupName:
+    Type: String
+    Default: admin
+  CognitoCustomerGroupName:
+    Type: String
+    Default: customer
+  CognitoUiDomainPrefix:
+    Type: String
+    Default: ""
+  CognitoUiCallbackUrls:
+    Type: String
+    Default: ""
+  CognitoUiLogoutUrls:
+    Type: String
+    Default: ""
+  CognitoUiOauthScopes:
+    Type: String
+    Default: openid,email,profile
+
+Conditions:
+  UseDatabaseSecretKmsKey: !Not [!Equals [!Ref DatabaseSecretKmsKeyArn, ""]]
+  UseEventBus: !Not [!Equals [!Ref EventBusName, ""]]
+  UseStandardAlertsTopic: !Not [!Equals [!Ref StandardAlertsTopicArn, ""]]
+  UseCriticalAlertsTopic: !Not [!Equals [!Ref CriticalAlertsTopicArn, ""]]
+  UseUiHostedLogin: !Not [!Equals [!Ref CognitoUiDomainPrefix, ""]]
+  AllowSelfSignup: !Equals [!Ref CognitoAllowSelfSignup, "true"]
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures:
+      - arm64
+    CodeUri: .
+    MemorySize: 512
+    Timeout: 15
+    LoggingConfig:
+      LogFormat: JSON
+      ApplicationLogLevel: INFO
+      SystemLogLevel: INFO
+      LogGroup: !Sub "/${ProjectName}/${EnvironmentName}/${ServiceName}"
+    Environment:
+      Variables:
+        SERVICE_NAME: !Ref ServiceName
+        APP_ENV: !Ref EnvironmentName
+        DB_HOST: !Ref DatabaseHost
+        DB_PORT: !Ref DatabasePort
+        DB_NAME: !Ref DatabaseName
+        DB_USER: !Ref DatabaseUsername
+        DB_SECRET_ARN: !Ref DatabaseSecretArn
+        DB_SSL_ENABLED: "true"
+        EVENT_BUS_NAME: !Ref EventBusName
+        PUBLISHER_BATCH_SIZE: !Ref PublisherBatchSize
+        PUBLISHER_CLAIM_TIMEOUT_SECONDS: !Ref PublisherClaimTimeoutSeconds
+    VpcConfig:
+      SecurityGroupIds:
+        - !Ref IdentitySecurityGroup
+      SubnetIds: !Ref PrivateSubnetIds
+
+Resources:
+  IdentitySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Identity service Lambda security group.
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - Description: PostgreSQL inside the workload VPC
+          IpProtocol: tcp
+          FromPort: !Ref DatabasePort
+          ToPort: !Ref DatabasePort
+          CidrIp: !Ref VpcCidr
+        - Description: NAT-backed outbound HTTPS for AWS public APIs
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${ServiceName}-${EnvironmentName}-sg"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: SAM
+
+  IdentityFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ServiceName}-${EnvironmentName}-lambda-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: !Sub "${ServiceName}-${EnvironmentName}-runtime"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadDatabaseSecret
+                Effect: Allow
+                Action:
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref DatabaseSecretArn
+              - !If
+                - UseDatabaseSecretKmsKey
+                - Sid: DecryptDatabaseSecret
+                  Effect: Allow
+                  Action:
+                    - kms:Decrypt
+                  Resource: !Ref DatabaseSecretKmsKeyArn
+                - !Ref AWS::NoValue
+              - !If
+                - UseEventBus
+                - Sid: PublishEvents
+                  Effect: Allow
+                  Action:
+                    - events:PutEvents
+                  Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/${EventBusName}"
+                - !Ref AWS::NoValue
+
+  PublishOutboxFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-publish-outbox"
+      Handler: src/outbox/handlers/publish-outbox.handler
+      Role: !GetAtt IdentityFunctionRole.Arn
+      Events:
+        PublishSchedule:
+          Type: ScheduleV2
+          Properties:
+            Name: !Sub "${ServiceName}-${EnvironmentName}-publish-outbox-schedule"
+            ScheduleExpression: !Ref PublisherScheduleExpression
+            State: !Ref PublisherScheduleState
+            Description: Publishes pending outbox rows to EventBridge.
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/outbox/handlers/publish-outbox.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2022
+
+  PostConfirmationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-post-confirmation"
+      Handler: src/users/handlers/post-confirmation.handler
+      Role: !GetAtt IdentityFunctionRole.Arn
+      Timeout: 5
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/users/handlers/post-confirmation.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2022
+
+  PostConfirmationInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref PostConfirmationFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+
+  IdentityUserPool:
+    Type: AWS::Cognito::UserPool
+    DependsOn:
+      - PostConfirmationInvokePermission
+    Properties:
+      UserPoolName: !Sub "${ProjectName}-identity-${EnvironmentName}"
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      DeletionProtection: !Ref CognitoDeletionProtection
+      MfaConfiguration: "OFF"
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+          TemporaryPasswordValidityDays: 7
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: !If [AllowSelfSignup, false, true]
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      LambdaConfig:
+        PostConfirmation: !GetAtt PostConfirmationFunction.Arn
+      UserPoolTags:
+        Project: !Ref ProjectName
+        Environment: !Ref EnvironmentName
+        ManagedBy: SAM
+        Service: identity
+
+  IdentityAdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: !Ref CognitoAdminGroupName
+      UserPoolId: !Ref IdentityUserPool
+      Description: !Sub "Internal admin users for ${ProjectName} ${EnvironmentName}."
+      Precedence: 10
+
+  IdentityCustomerGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: !Ref CognitoCustomerGroupName
+      UserPoolId: !Ref IdentityUserPool
+      Description: !Sub "Customer users for ${ProjectName} ${EnvironmentName}."
+      Precedence: 20
+
+  UiUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub "${ProjectName}-identity-${EnvironmentName}-ui"
+      UserPoolId: !Ref IdentityUserPool
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      AccessTokenValidity: 60
+      IdTokenValidity: 60
+      RefreshTokenValidity: 30
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+      SupportedIdentityProviders:
+        - COGNITO
+      AllowedOAuthFlowsUserPoolClient: !If [UseUiHostedLogin, true, false]
+      AllowedOAuthFlows: !If [UseUiHostedLogin, [code], !Ref AWS::NoValue]
+      AllowedOAuthScopes: !If
+        - UseUiHostedLogin
+        - !Split [",", !Ref CognitoUiOauthScopes]
+        - !Ref AWS::NoValue
+      CallbackURLs: !If
+        - UseUiHostedLogin
+        - !Split [",", !Ref CognitoUiCallbackUrls]
+        - !Ref AWS::NoValue
+      LogoutURLs: !If
+        - UseUiHostedLogin
+        - !Split [",", !Ref CognitoUiLogoutUrls]
+        - !Ref AWS::NoValue
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
+
+  AdminUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub "${ProjectName}-identity-${EnvironmentName}-admin"
+      UserPoolId: !Ref IdentityUserPool
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      AccessTokenValidity: 60
+      IdTokenValidity: 60
+      RefreshTokenValidity: 30
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+      SupportedIdentityProviders:
+        - COGNITO
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
+
+  IdentityUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Condition: UseUiHostedLogin
+    Properties:
+      Domain: !Ref CognitoUiDomainPrefix
+      UserPoolId: !Ref IdentityUserPool
+
+  IdentityServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${ProjectName}/${EnvironmentName}/${ServiceName}"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  PostConfirmationErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-post-confirmation-errors"
+      AlarmDescription: Cognito PostConfirmation is failing.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub "${ServiceName}-${EnvironmentName}-post-confirmation"
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [UseCriticalAlertsTopic, !Ref CriticalAlertsTopicArn, !Ref AWS::NoValue]
+
+  PostConfirmationDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-post-confirmation-duration-high"
+      AlarmDescription: Cognito PostConfirmation is approaching the upstream timeout budget.
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub "${ServiceName}-${EnvironmentName}-post-confirmation"
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 4000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [UseStandardAlertsTopic, !Ref StandardAlertsTopicArn, !Ref AWS::NoValue]
+
+  PublishOutboxErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-publish-outbox-errors"
+      AlarmDescription: The outbox publisher has failed repeatedly.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub "${ServiceName}-${EnvironmentName}-publish-outbox"
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 3
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [UseCriticalAlertsTopic, !Ref CriticalAlertsTopicArn, !Ref AWS::NoValue]
+
+  PublishOutboxDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-publish-outbox-duration-high"
+      AlarmDescription: The outbox publisher is taking longer than expected.
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub "${ServiceName}-${EnvironmentName}-publish-outbox"
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 10000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [UseStandardAlertsTopic, !Ref StandardAlertsTopicArn, !Ref AWS::NoValue]
+
+  CognitoUserPoolIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${ProjectName}/identity/${EnvironmentName}/cognito/user-pool-id"
+      Type: String
+      Value: !Ref IdentityUserPool
+
+  CognitoUserPoolArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${ProjectName}/identity/${EnvironmentName}/cognito/user-pool-arn"
+      Type: String
+      Value: !GetAtt IdentityUserPool.Arn
+
+  CognitoIssuerUrlParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${ProjectName}/identity/${EnvironmentName}/cognito/issuer-url"
+      Type: String
+      Value: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${IdentityUserPool}"
+
+  CognitoUiClientIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${ProjectName}/identity/${EnvironmentName}/cognito/ui-client-id"
+      Type: String
+      Value: !Ref UiUserPoolClient
+
+  CognitoAdminClientIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${ProjectName}/identity/${EnvironmentName}/cognito/admin-client-id"
+      Type: String
+      Value: !Ref AdminUserPoolClient
+
+  CognitoJwtAudiencesParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${ProjectName}/identity/${EnvironmentName}/cognito/jwt-audiences"
+      Type: StringList
+      Value: !Join [",", [!Ref UiUserPoolClient, !Ref AdminUserPoolClient]]
+
+  CognitoUiDomainUrlParameter:
+    Type: AWS::SSM::Parameter
+    Condition: UseUiHostedLogin
+    Properties:
+      Name: !Sub "/${ProjectName}/identity/${EnvironmentName}/cognito/ui-domain-url"
+      Type: String
+      Value: !Sub "https://${CognitoUiDomainPrefix}.auth.${AWS::Region}.amazoncognito.com"
+
+  CognitoUiCallbackUrlsParameter:
+    Type: AWS::SSM::Parameter
+    Condition: UseUiHostedLogin
+    Properties:
+      Name: !Sub "/${ProjectName}/identity/${EnvironmentName}/cognito/ui-callback-urls"
+      Type: StringList
+      Value: !Ref CognitoUiCallbackUrls
+
+  CognitoUiLogoutUrlsParameter:
+    Type: AWS::SSM::Parameter
+    Condition: UseUiHostedLogin
+    Properties:
+      Name: !Sub "/${ProjectName}/identity/${EnvironmentName}/cognito/ui-logout-urls"
+      Type: StringList
+      Value: !Ref CognitoUiLogoutUrls
+
+Outputs:
+  PostConfirmationFunctionArn:
+    Description: ARN of the Cognito PostConfirmation handler.
+    Value: !GetAtt PostConfirmationFunction.Arn
+  UserPoolId:
+    Description: Cognito user pool ID.
+    Value: !Ref IdentityUserPool
+  UserPoolArn:
+    Description: Cognito user pool ARN.
+    Value: !GetAtt IdentityUserPool.Arn
+  CognitoIssuerUrl:
+    Description: Cognito issuer URL.
+    Value: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${IdentityUserPool}"
+  UiClientId:
+    Description: Cognito app client ID for wumbo-ui.
+    Value: !Ref UiUserPoolClient
+  AdminClientId:
+    Description: Cognito app client ID for wumbo-admin.
+    Value: !Ref AdminUserPoolClient
+  UiDomainUrl:
+    Condition: UseUiHostedLogin
+    Description: Hosted login domain URL for wumbo-ui.
+    Value: !Sub "https://${CognitoUiDomainPrefix}.auth.${AWS::Region}.amazoncognito.com"
