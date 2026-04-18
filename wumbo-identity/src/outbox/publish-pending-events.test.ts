@@ -50,6 +50,9 @@ test("publishPendingOutboxBatch publishes claimed events and marks success and f
     },
     async getOutbox() {
       return {
+        async enqueue() {
+          throw new Error("enqueue should not be called while publishing pending events.");
+        },
         async claimPending(input) {
           assert.deepEqual(input, {
             limit: 10,
