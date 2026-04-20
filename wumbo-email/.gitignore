@@ -1,0 +1,6 @@
+node_modules/
+.aws-sam/
+.sam-appdata/
+dist/
+.env
+.env.local

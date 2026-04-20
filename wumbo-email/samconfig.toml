@@ -1,0 +1,38 @@
+version = 0.1
+
+[dev.deploy.parameters]
+stack_name = "wumbo-email-dev"
+resolve_s3 = true
+s3_prefix = "wumbo-email-dev"
+region = "us-west-2"
+confirm_changeset = true
+capabilities = "CAPABILITY_NAMED_IAM"
+# Replace DefaultFromEmail with a verified sender in Resend before deploying.
+# Set the Database* values from /wumbo/email/<env>/databases/email/* after running the shared Postgres provisioner.
+# Set ResendApiKeySecretArn to the Secrets Manager ARN that stores your Resend API key.
+# Set PublicBaseUrl to the deployed PublicApiUrl (or final custom domain) before sending promotional email.
+# Set ResendWebhookSecretArn after registering the public webhook URL in Resend.
+# Add optional KMS key and reply-to overrides only if you actually need them.
+parameter_overrides = """\
+VpcId="vpc-062ae6a609870fe32" \
+VpcCidr="10.20.0.0/16" \
+PrivateSubnetIds="subnet-0be082725b4b8d5c7,subnet-01bc92cc78884c77f" \
+DatabaseHost="wumbo-marketplace-dev-postgres.c5844q4ui74l.us-west-2.rds.amazonaws.com" \
+DatabaseName="email" \
+DatabaseUsername="email" \
+DatabaseSecretArn="arn:aws:secretsmanager:us-west-2:498309140969:secret:wumbo-email-dev-postgres/password-c56bg7" \
+DatabaseSecretKmsKeyArn="arn:aws:kms:us-west-2:498309140969:key/6d268ac7-1d64-47d2-915d-ac7ad2e4b574" \
+EventBusName="wumbo-marketplace-dev-domain-events" \
+DefaultFromEmail="no-reply@wumbostack.com" \
+PublicBaseUrl="https://wc344se7tj.execute-api.us-west-2.amazonaws.com/dev" \
+ResendApiKeySecretArn="arn:aws:secretsmanager:us-west-2:498309140969:secret:wumbo-email-dev-resend-api-key-quJwFz" \
+ResendWebhookSecretArn="arn:aws:secretsmanager:us-west-2:498309140969:secret:wumbo-email-dev-resend-webhook-secret-TGnxgQ" \
+StandardAlertsTopicArn="arn:aws:sns:us-west-2:498309140969:wumbo-marketplace-dev-alerts-standard" \
+CriticalAlertsTopicArn="arn:aws:sns:us-west-2:498309140969:wumbo-marketplace-dev-alerts-critical" \
+"""
+
+[dev.global.parameters]
+region = "us-west-2"
+
+[prod.global.parameters]
+region = "us-west-2"

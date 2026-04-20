@@ -1,0 +1,548 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Email delivery service for wumbo.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: wumbo
+  ServiceName:
+    Type: String
+    Default: wumbo-email
+  EnvironmentName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  VpcCidr:
+    Type: String
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  DatabaseHost:
+    Type: String
+  DatabasePort:
+    Type: Number
+    Default: 5432
+  DatabaseName:
+    Type: String
+  DatabaseUsername:
+    Type: String
+  DatabaseSecretArn:
+    Type: String
+  DatabaseSecretKmsKeyArn:
+    Type: String
+    Default: ""
+  EventBusName:
+    Type: String
+    Default: ""
+  ResendApiKeySecretArn:
+    Type: String
+    Default: ""
+  ResendApiKeySecretKmsKeyArn:
+    Type: String
+    Default: ""
+  ResendWebhookSecretArn:
+    Type: String
+    Default: ""
+  ResendWebhookSecretKmsKeyArn:
+    Type: String
+    Default: ""
+  DefaultFromEmail:
+    Type: String
+  PublicBaseUrl:
+    Type: String
+    Default: ""
+  DefaultReplyToEmail:
+    Type: String
+    Default: ""
+  StandardAlertsTopicArn:
+    Type: String
+    Default: ""
+  CriticalAlertsTopicArn:
+    Type: String
+    Default: ""
+  UnsubscribeWafRateLimit:
+    Type: Number
+    Default: 100
+  LogRetentionInDays:
+    Type: Number
+    Default: 30
+
+Conditions:
+  UseEventBus: !Not [!Equals [!Ref EventBusName, ""]]
+  UseDatabaseSecretKmsKey: !Not [!Equals [!Ref DatabaseSecretKmsKeyArn, ""]]
+  UseResendApiKeySecret: !Not [!Equals [!Ref ResendApiKeySecretArn, ""]]
+  UseResendApiKeySecretKmsKey: !Not [!Equals [!Ref ResendApiKeySecretKmsKeyArn, ""]]
+  UseResendWebhookSecret: !Not [!Equals [!Ref ResendWebhookSecretArn, ""]]
+  UseResendWebhookSecretKmsKey: !Not [!Equals [!Ref ResendWebhookSecretKmsKeyArn, ""]]
+  UseStandardAlertsTopic: !Not [!Equals [!Ref StandardAlertsTopicArn, ""]]
+  UseCriticalAlertsTopic: !Not [!Equals [!Ref CriticalAlertsTopicArn, ""]]
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures:
+      - arm64
+    CodeUri: .
+    MemorySize: 512
+    Timeout: 15
+    LoggingConfig:
+      LogFormat: JSON
+      ApplicationLogLevel: INFO
+      SystemLogLevel: INFO
+      LogGroup: !Sub "/${ProjectName}/${EnvironmentName}/${ServiceName}"
+    Environment:
+      Variables:
+        SERVICE_NAME: !Ref ServiceName
+        APP_ENV: !Ref EnvironmentName
+        PUBLIC_BASE_URL: !Ref PublicBaseUrl
+        DEFAULT_FROM_EMAIL: !Ref DefaultFromEmail
+        DEFAULT_REPLY_TO_EMAIL: !Ref DefaultReplyToEmail
+        DB_HOST: !Ref DatabaseHost
+        DB_PORT: !Ref DatabasePort
+        DB_NAME: !Ref DatabaseName
+        DB_USER: !Ref DatabaseUsername
+        DB_SECRET_ARN: !Ref DatabaseSecretArn
+        DB_SSL_ENABLED: "true"
+        RESEND_API_KEY_SECRET_ARN: !Ref ResendApiKeySecretArn
+        RESEND_WEBHOOK_SECRET_ARN: !Ref ResendWebhookSecretArn
+    VpcConfig:
+      SecurityGroupIds:
+        - !Ref EmailSecurityGroup
+      SubnetIds: !Ref PrivateSubnetIds
+
+Resources:
+  PublicRestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub "${ServiceName}-${EnvironmentName}-public"
+      StageName: !Ref EnvironmentName
+      EndpointConfiguration: REGIONAL
+
+  PublicApiWebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub "${ServiceName}-${EnvironmentName}-public-api"
+      Scope: REGIONAL
+      Description: Count-mode rate monitoring for the public email API.
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub "${ServiceName}${EnvironmentName}PublicApiWebAcl"
+      Rules:
+        - Name: CountUnsubscribePostRateByIp
+          Priority: 0
+          Action:
+            Count: {}
+          Statement:
+            RateBasedStatement:
+              AggregateKeyType: IP
+              EvaluationWindowSec: 300
+              Limit: !Ref UnsubscribeWafRateLimit
+              ScopeDownStatement:
+                AndStatement:
+                  Statements:
+                    - ByteMatchStatement:
+                        FieldToMatch:
+                          Method: {}
+                        PositionalConstraint: EXACTLY
+                        SearchString: POST
+                        TextTransformations:
+                          - Priority: 0
+                            Type: NONE
+                    - ByteMatchStatement:
+                        FieldToMatch:
+                          UriPath: {}
+                        PositionalConstraint: CONTAINS
+                        SearchString: /unsubscribe/
+                        TextTransformations:
+                          - Priority: 0
+                            Type: NONE
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: !Sub "${ServiceName}${EnvironmentName}UnsubscribePostRateCount"
+
+  PublicApiWebAclAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    DependsOn:
+      - PublicRestApiStage
+    Properties:
+      ResourceArn: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/restapis/${PublicRestApi}/stages/${EnvironmentName}"
+      WebACLArn: !GetAtt PublicApiWebAcl.Arn
+
+  EmailSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Email service Lambda security group.
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - Description: PostgreSQL inside the workload VPC
+          IpProtocol: tcp
+          FromPort: !Ref DatabasePort
+          ToPort: !Ref DatabasePort
+          CidrIp: !Ref VpcCidr
+        - Description: NAT-backed outbound HTTPS for AWS public APIs and third-party services
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${ServiceName}-${EnvironmentName}-sg"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Service
+          Value: email
+        - Key: ManagedBy
+          Value: SAM
+
+  EmailFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ServiceName}-${EnvironmentName}-lambda-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: !Sub "${ServiceName}-${EnvironmentName}-runtime"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadDatabaseSecret
+                Effect: Allow
+                Action:
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref DatabaseSecretArn
+              - !If
+                - UseDatabaseSecretKmsKey
+                - Sid: DecryptDatabaseSecret
+                  Effect: Allow
+                  Action:
+                    - kms:Decrypt
+                  Resource: !Ref DatabaseSecretKmsKeyArn
+                - !Ref AWS::NoValue
+              - Sid: ConsumeIdentityUserRegisteredQueue
+                Effect: Allow
+                Action:
+                  - sqs:ChangeMessageVisibility
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ReceiveMessage
+                Resource: !GetAtt IdentityUserRegisteredQueue.Arn
+              - !If
+                - UseResendApiKeySecret
+                - Sid: ReadResendApiKeySecret
+                  Effect: Allow
+                  Action:
+                    - secretsmanager:DescribeSecret
+                    - secretsmanager:GetSecretValue
+                  Resource: !Ref ResendApiKeySecretArn
+                - !Ref AWS::NoValue
+              - !If
+                - UseResendApiKeySecretKmsKey
+                - Sid: DecryptResendApiKeySecret
+                  Effect: Allow
+                  Action:
+                    - kms:Decrypt
+                  Resource: !Ref ResendApiKeySecretKmsKeyArn
+                - !Ref AWS::NoValue
+              - !If
+                - UseResendWebhookSecret
+                - Sid: ReadResendWebhookSecret
+                  Effect: Allow
+                  Action:
+                    - secretsmanager:DescribeSecret
+                    - secretsmanager:GetSecretValue
+                  Resource: !Ref ResendWebhookSecretArn
+                - !Ref AWS::NoValue
+              - !If
+                - UseResendWebhookSecretKmsKey
+                - Sid: DecryptResendWebhookSecret
+                  Effect: Allow
+                  Action:
+                    - kms:Decrypt
+                  Resource: !Ref ResendWebhookSecretKmsKeyArn
+                - !Ref AWS::NoValue
+
+  IdentityUserRegisteredDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered-dlq"
+      MessageRetentionPeriod: 1209600
+
+  IdentityUserRegisteredQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered"
+      VisibilityTimeout: 90
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt IdentityUserRegisteredDeadLetterQueue.Arn
+        maxReceiveCount: 5
+
+  IdentityUserRegisteredQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Condition: UseEventBus
+    Properties:
+      Queues:
+        - !Ref IdentityUserRegisteredQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowEventBridgeToSendIdentityUserRegisteredMessages
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt IdentityUserRegisteredQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !GetAtt IdentityUserRegisteredRule.Arn
+
+  IdentityUserRegisteredRule:
+    Type: AWS::Events::Rule
+    Condition: UseEventBus
+    Properties:
+      Name: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered"
+      Description: Routes identity user registration events into the email consumer queue.
+      EventBusName: !Ref EventBusName
+      EventPattern:
+        source:
+          - wumbo.identity
+        detail-type:
+          - identity.user.registered.v1
+      Targets:
+        - Arn: !GetAtt IdentityUserRegisteredQueue.Arn
+          Id: IdentityUserRegisteredQueueTarget
+
+  IdentityUserRegisteredConsumerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered"
+      Handler: src/handlers/consumers/identity-user-registered.handler
+      Role: !GetAtt EmailFunctionRole.Arn
+      Events:
+        IdentityUserRegisteredQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt IdentityUserRegisteredQueue.Arn
+            BatchSize: 10
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/handlers/consumers/identity-user-registered.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2022
+
+  UnsubscribeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-unsubscribe"
+      Handler: src/handlers/api/unsubscribe.handler
+      Role: !GetAtt EmailFunctionRole.Arn
+      Events:
+        UnsubscribeGetRoute:
+          Type: Api
+          Properties:
+            RestApiId: !Ref PublicRestApi
+            Path: /unsubscribe/{token}
+            Method: get
+        UnsubscribePostRoute:
+          Type: Api
+          Properties:
+            RestApiId: !Ref PublicRestApi
+            Path: /unsubscribe/{token}
+            Method: post
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/handlers/api/unsubscribe.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2022
+
+  ResendWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ServiceName}-${EnvironmentName}-resend-webhook"
+      Handler: src/handlers/webhooks/resend.handler
+      Role: !GetAtt EmailFunctionRole.Arn
+      Events:
+        ResendWebhookRoute:
+          Type: Api
+          Properties:
+            RestApiId: !Ref PublicRestApi
+            Path: /webhooks/resend
+            Method: post
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/handlers/webhooks/resend.ts
+        Format: cjs
+        Minify: false
+        Sourcemap: true
+        Target: es2022
+
+  EmailServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${ProjectName}/${EnvironmentName}/${ServiceName}"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  IdentityUserRegisteredErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered-errors"
+      AlarmDescription: The identity user registration email consumer is failing.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered"
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [UseCriticalAlertsTopic, !Ref CriticalAlertsTopicArn, !Ref AWS::NoValue]
+
+  IdentityUserRegisteredDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered-duration-high"
+      AlarmDescription: The identity user registration email consumer is taking longer than expected.
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered"
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 10000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [UseStandardAlertsTopic, !Ref StandardAlertsTopicArn, !Ref AWS::NoValue]
+
+  IdentityUserRegisteredDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered-dlq-visible"
+      AlarmDescription: Identity registration email messages are piling up in the DLQ.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !Sub "${ServiceName}-${EnvironmentName}-identity-user-registered-dlq"
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [UseCriticalAlertsTopic, !Ref CriticalAlertsTopicArn, !Ref AWS::NoValue]
+
+  ResendWebhookErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-resend-webhook-errors"
+      AlarmDescription: The Resend webhook handler is failing.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub "${ServiceName}-${EnvironmentName}-resend-webhook"
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [UseCriticalAlertsTopic, !Ref CriticalAlertsTopicArn, !Ref AWS::NoValue]
+
+  ResendWebhookDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-resend-webhook-duration-high"
+      AlarmDescription: The Resend webhook handler is taking longer than expected.
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub "${ServiceName}-${EnvironmentName}-resend-webhook"
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 10000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [UseStandardAlertsTopic, !Ref StandardAlertsTopicArn, !Ref AWS::NoValue]
+
+  UnsubscribeWafCountedRequestsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-${EnvironmentName}-unsubscribe-waf-counted-requests"
+      AlarmDescription: The unsubscribe WAF rate rule is matching requests in count mode.
+      Namespace: AWS/WAFV2
+      MetricName: CountedRequests
+      Dimensions:
+        - Name: Region
+          Value: !Ref AWS::Region
+        - Name: WebACL
+          Value: !Sub "${ServiceName}${EnvironmentName}PublicApiWebAcl"
+        - Name: Rule
+          Value: !Sub "${ServiceName}${EnvironmentName}UnsubscribePostRateCount"
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [UseStandardAlertsTopic, !Ref StandardAlertsTopicArn, !Ref AWS::NoValue]
+
+Outputs:
+  PublicApiUrl:
+    Description: Public REST API base URL for wumbo-email.
+    Value: !Sub "https://${PublicRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${EnvironmentName}"
+  ResendWebhookUrl:
+    Description: Resend webhook URL to register in the provider dashboard.
+    Value: !Sub "https://${PublicRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${EnvironmentName}/webhooks/resend"
