@@ -78,7 +78,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#SERVICES[@]} -eq 0 ]]; then
-  SERVICES=("core" "identity")
+  SERVICES=("core" "identity" "email")
 fi
 
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

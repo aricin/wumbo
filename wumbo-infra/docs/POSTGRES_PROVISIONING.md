@@ -17,7 +17,7 @@ This keeps the responsibilities split cleanly:
   - the KMS key
   - the jump host
 - the Postgres provisioner owns the Postgres objects inside that instance:
-  - logical databases such as `core` and `identity`
+  - logical databases such as `core`, `identity`, and `email`
   - service users
   - ownership and access rules
   - per-service secrets and SSM metadata
@@ -43,11 +43,13 @@ The provisioner currently creates:
 
 - `core` database + `core` user
 - `identity` database + `identity` user
+- `email` database + `email` user
 
 And it publishes service-owned metadata under:
 
 - `/wumbo/core/<env>/databases/core/*`
 - `/wumbo/identity/<env>/databases/identity/*`
+- `/wumbo/email/<env>/databases/email/*`
 
 Each service gets:
 
@@ -81,7 +83,7 @@ bash ./scripts/postgres/provision-service-databases.sh --environment dev --regio
 Default behavior:
 
 - workload = `marketplace`
-- services = `core`, `identity`
+- services = `core`, `identity`, `email`
 - local tunnel host = `127.0.0.1`
 - local tunnel port = `15432`
 

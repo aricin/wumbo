@@ -28,22 +28,22 @@ BEGIN
 END
 $do$;
 
+SELECT format(
+  'CREATE DATABASE %I OWNER %I',
+  current_setting('wumbo.service_name'),
+  current_setting('wumbo.service_name')
+)
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM pg_database
+  WHERE datname = current_setting('wumbo.service_name')
+)
+\gexec
+
 DO $do$
 DECLARE
   service_name text := current_setting('wumbo.service_name');
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_database
-    WHERE datname = service_name
-  ) THEN
-    EXECUTE format(
-      'CREATE DATABASE %I OWNER %I',
-      service_name,
-      service_name
-    );
-  END IF;
-
   EXECUTE format(
     'ALTER DATABASE %I OWNER TO %I',
     service_name,
